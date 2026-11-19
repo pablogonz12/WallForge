@@ -395,3 +395,24 @@ impl Engine {
         cur.0.tex
     }
 }
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    /// Regression: a 3840x2160 image stored in a 4096x4096 power-of-two texture must sample only the image area,
+    /// and an object the size of the scene must cover the whole output in clip space.
+    #[test]
+    fn padded_texture_and_fullscreen_layout() {
+        let uv = tex::uv_scale((3840, 2160), (4096, 4096));
+        assert!((uv[0] - 0.9375).abs() < 1e-6 && (uv[1] - 0.52734375).abs() < 1e-6);
+        assert_eq!(tex::uv_scale((4096, 4096), (4096, 4096)), [1.0, 1.0]);
+        for (ow, oh) in [(2560, 1440), (1280, 720), (1920, 1080)] {
+            let (m, _, _) = view_matrix(3840.0, 2160.0, ow, oh, Scaling::Fill);
+            // scene corners (0,0) and (w,h) map to clip -1 and +1 on both axes (column-major 4x4)
+            let (x0, y0) = (m[12], m[13]);
+            let (x1, y1) = (m[0] * 3840.0 + m[12], m[5] * 2160.0 + m[13]);
+            assert!((x0 + 1.0).abs() < 1e-4 && (y0 + 1.0).abs() < 1e-4, "{ow}x{oh}: {x0} {y0}");
+            assert!((x1 - 1.0).abs() < 1e-4 && (y1 - 1.0).abs() < 1e-4, "{ow}x{oh}: {x1} {y1}");
+        }
+    }
+}

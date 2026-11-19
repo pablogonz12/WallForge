@@ -218,6 +218,8 @@ pub fn report(vfs: &Vfs, s: &Scene) -> Value {
     let mut effects = BTreeSet::new();
     let mut missing = BTreeSet::new();
     let mut unsupported: Vec<String> = s.fatal.clone();
+    let mut unsupported_layers: Vec<String> = vec![];
+    let mut unsupported_effects = BTreeSet::new();
     for o in &s.objects {
         match &o.kind {
             Kind::Image { model } => {
@@ -225,6 +227,7 @@ pub fn report(vfs: &Vfs, s: &Scene) -> Value {
                 match load_image(vfs, model) { Some(d) => if d.puppet { unsupported.push(format!("puppet animation in '{}'", o.name)); }, None => { missing.insert(model.clone()); } }
             }
             Kind::Particle { .. } => particles += 1,
+            Kind::Other(k) => unsupported_layers.push(format!("{} ({})", o.name, k)),
             Kind::Sound { .. } => sounds += 1,
             Kind::Light => lights += 1,
             _ => {}
@@ -232,7 +235,7 @@ pub fn report(vfs: &Vfs, s: &Scene) -> Value {
         for e in &o.effects {
             effects.insert(e.file.clone());
             match load_effect(vfs, &e.file) {
-                None => { missing.insert(e.file.clone()); }
+                None => { missing.insert(e.file.clone()); unsupported_effects.insert(e.file.clone()); }
                 Some(d) => for p in &d.passes {
                     if let Some(m) = load_material(vfs, &p.material) {
                         for ext in ["vert", "frag"] { let f = format!("shaders/{}.{ext}", m.shader); if !vfs.exists(&f) { missing.insert(f); } }
@@ -244,7 +247,7 @@ pub fn report(vfs: &Vfs, s: &Scene) -> Value {
     let ok = unsupported.is_empty();
     json!({"ok": true, "type": "scene", "width": s.width, "height": s.height, "layers": s.objects.len(), "images": images,
         "effects": effects, "particles": particles, "sounds": sounds, "lights": lights,
-        "missing_files": missing, "unsupported": unsupported, "warnings": s.warnings,
+        "missing_files": missing, "unsupported": unsupported, "unsupported_layers": unsupported_layers, "unsupported_effects": unsupported_effects, "warnings": s.warnings,
         "supported": ok, "fully_supported": ok && particles == 0 && missing.is_empty() && s.warnings.is_empty(),
         "stage2_pending": {"particles": particles, "sounds": sounds}})
 }
