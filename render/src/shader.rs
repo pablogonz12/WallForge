@@ -28,6 +28,13 @@ precision highp sampler2D;
 #define CAST3(x) (vec3(x))
 #define CAST4(x) (vec4(x))
 #define CAST3X3(x) (mat3(x))
+#define sample wf_sample
+#define input wf_input
+#define output wf_output
+#define filter wf_filter
+#define common wf_common
+#define active wf_active
+#define partition wf_partition
 #define texture2D texture
 #define texSample2D texture
 #define texSample2DLod textureLod
@@ -59,7 +66,7 @@ fn val_str(v: &Value) -> String {
 }
 
 fn stage(read: &dyn Fn(&str) -> Option<String>, path: &str, is_frag: bool, over: &Map<String, Value>, uniforms: &mut Vec<Uniform>,
-         combos: &mut BTreeMap<String, String>) -> Result<String, String> {
+         combos: &mut BTreeMap<String, String>, present: &[usize], floatify: bool) -> Result<String, String> {
     let raw = read(path).ok_or_else(|| format!("missing shader {path}"))?;
     let mut src = String::new();
     expand(read, &raw, 0, &mut src)?;
@@ -78,6 +85,10 @@ fn stage(read: &dyn Fn(&str) -> Option<String>, path: &str, is_frag: bool, over:
             let (Some(ty), Some(name)) = (it.next(), it.next()) else { continue };
             let name = name.split('[').next().unwrap_or(name).to_string();
             let j = json_tail(t);
+            // sampler annotation {"combo":"X"}: X is 1 when a texture is bound to that slot
+            if let (Some(cn), Some(slot)) = (j.as_ref().and_then(|j| j.get("combo")).and_then(|c| c.as_str()), name.strip_prefix("g_Texture").and_then(|n| n.parse::<usize>().ok())) {
+                combos.insert(cn.to_string(), if present.contains(&slot) { "1".into() } else { "0".into() });
+            }
             let u = Uniform { name: name.clone(), ty: ty.to_string(),
                 material: j.as_ref().and_then(|j| j.get("material")).and_then(|m| m.as_str()).map(String::from),
                 default: j.as_ref().and_then(|j| j.get("default")).cloned() };
@@ -89,19 +100,89 @@ fn stage(read: &dyn Fn(&str) -> Option<String>, path: &str, is_frag: bool, over:
     // combos: defaults found in this stage, overridden by the material/effect values
     let mut all = combos.clone();
     for (k, v) in over { all.insert(k.clone(), val_str(v)); }
+    // C preprocessor semantics: unknown identifiers in #if/#elif evaluate to 0 (GLSL ES makes them an error)
+    for k in undefined_in_conditions(&src) { if !all.contains_key(&k) { all.insert(k, "0".into()); } }
     for (k, v) in &all { o.push_str(&format!("#define {k} {v}\n")); }
-    o.push_str(&src);
+    o.push_str(&if floatify { floatify_src(&src) } else { src });
     Ok(o)
 }
 
-pub fn translate(read: &dyn Fn(&str) -> Option<String>, shader: &str, combo_over: &Map<String, Value>) -> Result<Translated, String> {
+/// Identifiers used in `#if`/`#elif` expressions that are neither defined in the source nor keywords.
+pub fn undefined_in_conditions(src: &str) -> Vec<String> {
+    let mut defined: Vec<String> = vec![];
+    for l in src.lines() {
+        let t = l.trim_start();
+        if let Some(r) = t.strip_prefix('#') { let r = r.trim_start(); if let Some(d) = r.strip_prefix("define") { if let Some(n) = d.split_whitespace().next() { defined.push(n.split('(').next().unwrap_or(n).to_string()); } } }
+    }
+    let mut out: Vec<String> = vec![];
+    for l in src.lines() {
+        let t = l.trim_start();
+        let Some(r) = t.strip_prefix('#') else { continue };
+        let r = r.trim_start();
+        let expr = if let Some(e) = r.strip_prefix("if ").or_else(|| r.strip_prefix("if(")) { e } else if let Some(e) = r.strip_prefix("elif") { e } else { continue };
+        let expr = expr.split("//").next().unwrap_or("");
+        let b = expr.as_bytes();
+        let mut i = 0;
+        let mut after_defined = false;
+        while i < b.len() {
+            if b[i].is_ascii_alphabetic() || b[i] == b'_' {
+                let st = i;
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') { i += 1; }
+                let id = &expr[st..i];
+                if id == "defined" { after_defined = true; continue; }
+                if after_defined { after_defined = false; continue; }
+                if !defined.iter().any(|d| d == id) && !out.iter().any(|d| d == id) { out.push(id.to_string()); }
+            } else if b[i].is_ascii_digit() {
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'.') { i += 1; }
+            } else { if !(b[i] == b'(' || b[i] == b' ') { after_defined = false; } i += 1; }
+        }
+    }
+    out
+}
+
+/// Desktop GLSL converts int -> float implicitly (`2 * x`, `smoothstep(0, 1, x)`); ES 3.00 does not. Used as a retry for
+/// shaders that fail to compile: integer literals outside integer-looking contexts become float literals.
+pub fn floatify_src(src: &str) -> String {
+    let mut out = String::with_capacity(src.len() + 64);
+    for line in src.lines() {
+        let t = line.trim_start();
+        let intish = t.starts_with('#') || line.contains("int ") || line.contains("ivec") || line.contains("uint") || line.contains("switch") || line.contains("case ");
+        if intish { out.push_str(line); out.push('\n'); continue; }
+        let b = line.as_bytes();
+        let mut i = 0;
+        let mut bracket = 0i32;
+        let code_end = line.find("//").unwrap_or(line.len());
+        while i < b.len() {
+            let c = b[i];
+            if i >= code_end { out.push(c as char); i += 1; continue; }
+            if c == b'[' { bracket += 1; } else if c == b']' { bracket -= 1; }
+            if c.is_ascii_alphabetic() || c == b'_' {
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') { out.push(b[i] as char); i += 1; }
+            } else if c.is_ascii_digit() {
+                let st = i;
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'.') { i += 1; }
+                if i < b.len() && (b[i] == b'-' || b[i] == b'+') && line[st..i].ends_with(|c| c == 'e' || c == 'E') && line[st..i].starts_with(|c: char| c.is_ascii_digit()) {
+                    i += 1;
+                    while i < b.len() && b[i].is_ascii_digit() { i += 1; }
+                }
+                let tok = &line[st..i];
+                let prev = if st > 0 { b[st - 1] } else { b' ' };
+                if tok.bytes().all(|d| d.is_ascii_digit()) && bracket == 0 && prev != b'.' { out.push_str(tok); out.push_str(".0"); } else { out.push_str(tok); }
+            } else { out.push(c as char); i += 1; }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+pub fn translate(read: &dyn Fn(&str) -> Option<String>, shader: &str, combo_over: &Map<String, Value>, present: &[usize], floatify: bool) -> Result<Translated, String> {
     let mut uniforms = vec![];
     let mut combos = BTreeMap::new();
     // two passes so the vertex stage also sees combos declared in the fragment stage and vice versa
-    let _ = stage(read, &format!("shaders/{shader}.vert"), false, combo_over, &mut uniforms, &mut combos)?;
-    let _ = stage(read, &format!("shaders/{shader}.frag"), true, combo_over, &mut uniforms, &mut combos)?;
-    let vert = stage(read, &format!("shaders/{shader}.vert"), false, combo_over, &mut uniforms, &mut combos)?;
-    let frag = stage(read, &format!("shaders/{shader}.frag"), true, combo_over, &mut uniforms, &mut combos)?;
+    let _ = stage(read, &format!("shaders/{shader}.vert"), false, combo_over, &mut uniforms, &mut combos, present, floatify)?;
+    let _ = stage(read, &format!("shaders/{shader}.frag"), true, combo_over, &mut uniforms, &mut combos, present, floatify)?;
+    let vert = stage(read, &format!("shaders/{shader}.vert"), false, combo_over, &mut uniforms, &mut combos, present, floatify)?;
+    let frag = stage(read, &format!("shaders/{shader}.frag"), true, combo_over, &mut uniforms, &mut combos, present, floatify)?;
     let uses_time = vert.contains("g_Time") || frag.contains("g_Time");
     Ok(Translated { vert, frag, uniforms, uses_time, combos })
 }
@@ -119,7 +200,7 @@ mod tests {
     }
     #[test]
     fn translates_sample() {
-        let t = translate(&fs, "effects/test", &Map::new()).unwrap();
+        let t = translate(&fs, "effects/test", &Map::new(), &[], false).unwrap();
         assert!(t.vert.starts_with("#version 300 es"));
         assert!(t.frag.contains("#define MODE 1"));
         assert!(t.vert.contains("vec3 gray") && !t.vert.contains("#include"));
@@ -130,7 +211,9 @@ mod tests {
         assert_eq!((u.material.as_deref(), u.default.clone()), (Some("amount"), Some(serde_json::json!(0.5))));
         assert!(t.uses_time);
         let mut over = Map::new(); over.insert("MODE".into(), serde_json::json!(0));
-        assert!(translate(&fs, "effects/test", &over).unwrap().frag.contains("#define MODE 0"));
-        assert!(translate(&fs, "effects/none", &Map::new()).is_err());
+        assert!(translate(&fs, "effects/test", &over, &[], false).unwrap().frag.contains("#define MODE 0"));
+        assert_eq!(undefined_in_conditions("#define A 1\n#if A == 1 && defined(B) && MASK\n#endif\n#elif SPEC > 2\n"), vec!["MASK", "SPEC"]);
+        assert_eq!(floatify_src("float b = 2 * x + v[1] - smoothstep(0, 1.5, y);\nint k = 3;\n"), "float b = 2.0 * x + v[1] - smoothstep(0.0, 1.5, y);\nint k = 3;\n");
+        assert!(translate(&fs, "effects/none", &Map::new(), &[], false).is_err());
     }
 }

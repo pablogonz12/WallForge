@@ -109,7 +109,7 @@ mod tests {
         let img = scene::load_image(&vfs, "models/dxt.json").unwrap();
         let t = crate::tex::parse(&vfs.read(img.tex_path.as_deref().unwrap()).unwrap(), false).unwrap();
         assert_eq!((t.img_w, t.img_h), (8, 8));
-        let tr = shader::translate(&|n| vfs.read_str(n), "effects/wfblur", &serde_json::Map::new()).unwrap();
+        let tr = shader::translate(&|n| vfs.read_str(n), "effects/wfblur", &serde_json::Map::new(), &[], false).unwrap();
         assert!(tr.frag.contains("#define DIR 0"));
         let _ = std::fs::remove_dir_all(&d);
     }

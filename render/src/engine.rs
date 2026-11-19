@@ -177,6 +177,7 @@ impl Engine {
             // effects
             let effects: Vec<_> = self.scene.objects[i].effects.iter().map(|e| (e.file.clone(), e.name.clone(), e.passes.iter().map(|p| (p.constants.clone(), p.textures.clone(), p.combos.clone())).collect::<Vec<_>>())).collect();
             let mut fbo_div: HashMap<String, f32> = HashMap::new();
+            let effects: Vec<_> = effects.into_iter().take(std::env::var("WF_MAXFX").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX)).collect();
             for (file, ename, ovs) in effects {
                 let Some(ed) = scene::load_effect(&self.vfs, &file) else { self.note(format!("layer '{name}': effect {file} not found, skipped")); continue };
                 for f in &ed.fbos { fbo_div.insert(f.name.clone(), f.scale.max(1.0)); }
@@ -215,15 +216,44 @@ impl Engine {
         let mat = scene::load_material(&self.vfs, &ep.material).ok_or_else(|| format!("material {} not found", ep.material))?;
         let mut combos = mat.combos.clone();
         if let Some((_, _, c)) = ov { for (k, v) in c { combos.insert(k.clone(), v.clone()); } }
-        let key = format!("{}|{}", mat.shader, Value::Object(combos.clone()));
+        let mut present: Vec<usize> = vec![];
+        {
+            let mut names: std::collections::BTreeMap<usize, bool> = std::collections::BTreeMap::new();
+            for (i, t) in mat.textures.iter().enumerate() { names.insert(i, t.is_some()); }
+            for (i, t) in ep.textures.iter().enumerate() { if t.is_some() { names.insert(i, true); } }
+            if let Some((_, ts, _)) = ov { for (i, x) in ts.iter().enumerate() { if x.is_some() { names.insert(i, true); } } }
+            for (i, b) in names { if b { present.push(i); } }
+        }
+        let key = format!("{}|{}|{:?}", mat.shader, Value::Object(combos.clone()), present);
         if !self.shader_cache.contains_key(&key) {
             let vfs = &self.vfs;
-            let r = shader::translate(&|n| vfs.read_str(n), &mat.shader, &combos);
+            let r = shader::translate(&|n| vfs.read_str(n), &mat.shader, &combos, &present, false);
             if let Err(e) = &r { eprintln!("wallforge-render: shader {}: {e}", mat.shader); }
             self.shader_cache.insert(key.clone(), r.ok());
         }
         let tr = self.shader_cache.get(&key).and_then(|t| t.as_ref()).ok_or_else(|| format!("shader '{}' unavailable", mat.shader))?;
-        let prog = link(&tr.vert, &tr.frag).map_err(|e| format!("shader '{}' {}", mat.shader, e.lines().next().unwrap_or("")))?;
+        let retry = match link(&tr.vert, &tr.frag) {
+            Ok(p) => Ok((p, None)),
+            Err(e1) => {
+                let vfs = &self.vfs;
+                match shader::translate(&|n| vfs.read_str(n), &mat.shader, &combos, &present, true) {
+                    Ok(t2) => match link(&t2.vert, &t2.frag) { Ok(p) => Ok((p, Some(t2))), Err(e2) => Err((e2, Some(t2))) },
+                    Err(_) => Err((e1, None)),
+                }
+            }
+        };
+        let (prog, tr_fix) = match retry { Ok(x) => x, Err((e, t2)) => {
+            let tr = t2.as_ref().unwrap_or(tr);
+            if let Ok(d) = std::env::var("WF_DUMP_SHADERS") {
+                let n = mat.shader.replace('/', "_");
+                let _ = std::fs::create_dir_all(&d);
+                let _ = std::fs::write(format!("{d}/{n}.vert"), &tr.vert);
+                let _ = std::fs::write(format!("{d}/{n}.frag"), &tr.frag);
+                let _ = std::fs::write(format!("{d}/{n}.err"), &e);
+            }
+            return Err(format!("shader '{}' {}", mat.shader, e.lines().next().unwrap_or("")));
+        } };
+        let tr = tr_fix.as_ref().unwrap_or(tr);
         let uniforms: Vec<(Uniform, i32)> = tr.uniforms.iter().map(|u| (u.clone(), loc(prog, &u.name))).filter(|(_, l)| *l >= 0).collect();
         let mut values: HashMap<String, Vec<f32>> = HashMap::new();
         for (k, v) in mat.constants.iter().chain(ov.map(|o| &o.0).into_iter().flatten()) {
@@ -310,7 +340,8 @@ impl Engine {
                 gl::UniformMatrix4fv(self.u_mvp, 1, gl::FALSE, mvp.as_ptr());
                 gl::Uniform2f(self.u_size, l.size[0], l.size[1]);
                 gl::Uniform4f(self.u_tint, l.color[0], l.color[1], l.color[2], l.alpha);
-                gl::Uniform1f(self.u_flip, 0.0); gl::Uniform2f(self.u_uvs, l.uvs[0], l.uvs[1]);
+                gl::Uniform1f(self.u_flip, 0.0);
+                if l.ping.is_some() { gl::Uniform2f(self.u_uvs, 1.0, 1.0); } else { gl::Uniform2f(self.u_uvs, l.uvs[0], l.uvs[1]); }
                 gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, src_tex);
                 gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
                 gl::Disable(gl::BLEND);
@@ -329,7 +360,7 @@ impl Engine {
             gl::ClearColor(0.0, 0.0, 0.0, 0.0); gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::UseProgram(self.prog);
             gl::UniformMatrix4fv(self.u_mvp, 1, gl::FALSE, scene::ident().as_ptr());
-            gl::Uniform2f(self.u_size, 1.0, 1.0);
+            gl::Uniform2f(self.u_size, 2.0, 2.0);
             gl::Uniform4f(self.u_tint, 1.0, 1.0, 1.0, 1.0);
             gl::Uniform1f(self.u_flip, 1.0); gl::Uniform2f(self.u_uvs, l.uvs[0], l.uvs[1]);
             gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, l.tex);
