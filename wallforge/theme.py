@@ -9,10 +9,53 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import library
+from . import engine, library, monitors
 
 CACHE = Path.home() / ".cache/wallforge"
 BACKENDS = ["auto", "noctalia", "matugen", "wallust", "pywal", "custom", "none"]
+
+
+def _screen_size(output: str | None) -> tuple[int, int]:
+    try:
+        outs = monitors.outputs()
+        m = next((o for o in outs if o["name"] == output), outs[0])
+        return int(m["width"]), int(m["height"])
+    except Exception:
+        return 2560, 1440
+
+
+def rendered_still(cfg, item: library.Item, output: str | None) -> Path | None:
+    """A sharp, screen-sized still of the wallpaper itself (the Workshop preview is small and looks blurry when a
+    desktop shows it big, e.g. in the niri overview). Cached; None if it cannot be made."""
+    w, h = _screen_size(output)
+    out = CACHE / f"{item.id}-{w}x{h}.png"
+    if out.exists():
+        return out
+    CACHE.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".tmp.png")
+    try:
+        if item.kind == "video":
+            vid = item.run_dir / (item.base_project().get("file") or "") if item.base_project().get("file") else None
+            if not (vid and vid.is_file()) or not shutil.which("ffmpeg"):
+                return None
+            for ss in ("5", "0"):
+                subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", ss, "-i", str(vid), "-frames:v", "1", "-vf",
+                                f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h}", str(tmp)],
+                               timeout=30, capture_output=True)
+                if tmp.exists():
+                    break
+        elif item.kind == "scene" and engine.use_native(cfg, item):
+            args = engine.build_native_args(cfg, item, output or "")
+            subprocess.run(args + ["--screenshot", str(tmp), "--screenshot-size", f"{w}x{h}", "--screenshot-time", "3",
+                                   "--silent"], timeout=40, capture_output=True)
+        if tmp.exists() and tmp.stat().st_size > 1000:
+            tmp.replace(out)
+            return out
+    except Exception:
+        pass
+    finally:
+        tmp.unlink(missing_ok=True)
+    return None
 
 
 def still_for(item: library.Item) -> Path | None:
@@ -60,7 +103,7 @@ def sync(cfg, item: library.Item, output: str | None):
         backend = detect()
     if backend in ("none", ""):
         return
-    img = still_for(item)
+    img = rendered_still(cfg, item, output) or still_for(item)
     if not img:
         return
     cmd = _cmd(backend, img, output, cfg.data.get("palette_command", ""))
