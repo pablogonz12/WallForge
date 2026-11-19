@@ -97,6 +97,9 @@ def restart() -> None:
     os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]])
 
 
+BUILD_ERROR = ""  # last line of the renderer build's error output, for the UI
+
+
 def ensure_render() -> bool:
     """Git checkout without a built renderer: build it once in the background (needs cargo). True if now available."""
     import shutil
@@ -105,8 +108,14 @@ def ensure_render() -> bool:
         return True
     if not (crate / "Cargo.toml").is_file() or not shutil.which("cargo"):
         return False
+    global BUILD_ERROR
     try:
-        r = subprocess.run(["cargo", "build", "--release", "-q"], cwd=str(crate), capture_output=True, timeout=1200)
+        r = subprocess.run(["cargo", "build", "--release", "-q"], cwd=str(crate), capture_output=True, text=True, timeout=1200)
+        if r.returncode:
+            lines = [l.strip() for l in (r.stderr or "").splitlines() if l.strip()]
+            err = next((l for l in lines if l.startswith("error")), lines[-1] if lines else "build failed")
+            BUILD_ERROR = err[:160]
         return r.returncode == 0
-    except Exception:
+    except Exception as e:
+        BUILD_ERROR = str(e)[:160]
         return False

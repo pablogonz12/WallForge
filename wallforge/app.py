@@ -393,7 +393,13 @@ class Window(Adw.ApplicationWindow):
                 return
             if not paths.find_render() and not paths.find_engine(self.cfg.data["engine_dir"]):
                 self._check_setup()
-                self.toasts.add_toast(Adw.Toast(title="Finish setup first (Settings > Setup)"))
+                if getattr(self, "_building", False):
+                    msg = "The renderer is still building, try again in a minute"
+                elif not shutil.which("cargo"):
+                    msg = "Install Rust and clang first (Arch: sudo pacman -S rust clang), then restart Wallforge"
+                else:
+                    msg = "The renderer is not built: see the banner at the top"
+                self.toasts.add_toast(Adw.Toast(title=msg))
                 return
         self.cfg.save()
 
@@ -556,6 +562,10 @@ class Window(Adw.ApplicationWindow):
                 return
             if not shutil.which("cargo"):
                 self.banner.set_title("Wallforge needs Rust to build its renderer: install rust and clang (Arch: sudo pacman -S rust clang), then restart.")
+                self.banner.set_revealed(True)
+                return
+            if updater.BUILD_ERROR:
+                self.banner.set_title("The renderer failed to build (" + updater.BUILD_ERROR + "). Install rust, clang, ffmpeg and libva, then restart.")
                 self.banner.set_revealed(True)
                 return
             miss.append("the Wallforge renderer")
