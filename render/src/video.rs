@@ -57,6 +57,16 @@ pub struct Decoder {
     pub width: u32,
     pub height: u32,
     scaler: Option<(ff::software::scaling::Context, ff::frame::Video)>,
+    /// Set when the stream cannot be decoded (no frame in a whole pass, too many errors).
+    pub failed: bool,
+    got_in_loop: u32,
+    loops: u32,
+    /// Single-frame video: show it once, never decode again.
+    pub single: bool,
+    delivered: bool,
+    pub map_fails: u32,
+    /// Duration of the video stream in seconds (0 = unknown).
+    pub stream_secs: f64,
 }
 
 unsafe extern "C" fn get_vaapi_format(_c: *mut sys::AVCodecContext, fmts: *const sys::AVPixelFormat) -> sys::AVPixelFormat {
@@ -71,13 +81,14 @@ unsafe extern "C" fn get_vaapi_format(_c: *mut sys::AVCodecContext, fmts: *const
 impl Decoder {
     pub fn open(path: &str, want_hw: bool, cap: f64) -> Result<Decoder, String> {
         ff::init().map_err(|e| e.to_string())?;
-        unsafe { sys::av_log_set_level(sys::AV_LOG_ERROR as i32) };
+        unsafe { sys::av_log_set_level(if std::env::var_os("WALLFORGE_FFMPEG_LOG").is_some() { sys::AV_LOG_WARNING as i32 } else { sys::AV_LOG_QUIET }) };
         let input = ff::format::input(&path).map_err(|e| format!("open {path}: {e}"))?;
         let st = input.streams().best(ff::media::Type::Video).ok_or("no video stream")?;
         let stream = st.index();
         let tb: f64 = st.time_base().into();
         let fr: f64 = st.avg_frame_rate().into();
         let fps = if fr.is_finite() && fr > 1.0 { fr } else { 30.0 };
+        let stream_secs = if st.duration() > 0 { st.duration() as f64 * tb } else { 0.0 };
         let mut ctx = ff::codec::context::Context::from_parameters(st.parameters()).map_err(|e| e.to_string())?;
         let mut hw = false;
         unsafe {
@@ -95,14 +106,20 @@ impl Decoder {
                 }
             } else {
                 (*c).thread_count = 4;
-                (*c).thread_type = sys::FF_THREAD_FRAME as i32 | sys::FF_THREAD_SLICE as i32;
+                (*c).thread_type = if std::env::var_os("WF_SLICE").is_some() { sys::FF_THREAD_SLICE as i32 } else { sys::FF_THREAD_FRAME as i32 | sys::FF_THREAD_SLICE as i32 };
             }
         }
-        let dec = ctx.decoder().video().map_err(|e| format!("decoder: {e}"))?;
+        // libdav1d (the default AV1 decoder) cannot do VAAPI; use the native "av1" decoder for hardware
+        let native_av1 = if want_hw && ctx.id() == ff::codec::Id::AV1 { ff::decoder::find_by_name("av1") } else { None };
+        let dec = match native_av1 {
+            Some(c) => ctx.decoder().open_as(c).and_then(|o| o.video()),
+            None => ctx.decoder().video(),
+        }.map_err(|e| format!("decoder: {e}"))?;
         let (width, height) = (dec.width(), dec.height());
         Ok(Decoder {
             input, dec, stream, tb, fps, dur: 1.0 / fps, start_ts: None, loop_off: 0.0, last_pts: 0.0,
             state: State::Reading, pending: None, hw, width, height, scaler: None,
+            failed: false, got_in_loop: 0, loops: 0, single: false, delivered: false, map_fails: 0, stream_secs,
         })
     }
 
@@ -117,26 +134,31 @@ impl Decoder {
                     let st = *self.start_ts.get_or_insert(t);
                     let pts = t - st + self.loop_off;
                     self.last_pts = pts;
+                    self.got_in_loop += 1;
                     self.pending = Some(Pending { frame, pts, pos: t - st });
                     return true;
                 }
-                Err(ff::Error::Eof) => self.restart(),
+                Err(ff::Error::Eof) => { self.restart(); if self.failed { return false; } }
                 Err(ff::Error::Other { errno }) if errno == libc::EAGAIN => {
-                    if self.state == State::Draining { self.restart(); continue; }
+                    if self.state == State::Draining { self.restart(); if self.failed { return false; } continue; }
                     let mut pkt = ff::Packet::empty();
                     match pkt.read(&mut self.input) {
                         Ok(()) => { if pkt.stream() == self.stream { let _ = self.dec.send_packet(&pkt); } }
                         Err(ff::Error::Eof) => { let _ = self.dec.send_eof(); self.state = State::Draining; }
-                        Err(_) => { errs += 1; if errs > 50 { return false; } }
+                        Err(_) => { errs += 1; if errs > 50 { self.failed = true; return false; } }
                     }
                 }
-                Err(_) => { errs += 1; if errs > 50 { return false; } self.restart(); }
+                Err(_) => { errs += 1; if errs > 50 { self.failed = true; return false; } }
             }
         }
     }
 
     /// Loop: seek back to the start and continue the timeline.
     fn restart(&mut self) {
+        if self.got_in_loop == 0 { self.failed = true; return; }
+        if self.loops == 0 && self.got_in_loop == 1 { self.single = true; }
+        self.loops += 1;
+        self.got_in_loop = 0;
         unsafe { sys::av_seek_frame(self.input.as_mut_ptr(), -1, 0, sys::AVSEEK_FLAG_BACKWARD as i32); }
         self.dec.flush();
         self.state = State::Reading;
@@ -146,7 +168,13 @@ impl Decoder {
 
     /// Return the newest frame whose presentation time is <= target (media seconds). Earlier due frames
     /// are dropped without any export/upload. None if no new frame is due yet.
+    pub fn frame_dur(&self) -> f64 { self.dur }
+
+    /// Media time of the next undelivered frame (None if unknown / static).
+    pub fn next_pts(&self) -> Option<f64> { if self.single { None } else { self.pending.as_ref().map(|p| p.pts) } }
+
     pub fn advance(&mut self, target: f64) -> Option<Frame> {
+        if self.single && self.delivered { return None; }
         let mut cand: Option<Pending> = None;
         loop {
             if self.pending.is_none() && !self.decode_next() { break; }
@@ -154,7 +182,9 @@ impl Decoder {
             if p.pts <= target + self.dur * 0.5 { cand = self.pending.take(); } else { break; }
         }
         let p = cand?;
-        self.make(p)
+        let f = self.make(p);
+        if f.is_some() { self.delivered = true; } else { self.map_fails += 1; }
+        f
     }
 
     fn make(&mut self, p: Pending) -> Option<Frame> {

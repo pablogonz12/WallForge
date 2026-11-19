@@ -1,4 +1,5 @@
 mod audio;
+mod check;
 mod egl;
 mod gfx;
 mod video;
@@ -18,7 +19,29 @@ use wayland_protocols::wp::viewporter::client::{wp_viewport, wp_viewporter};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 static STOP: AtomicBool = AtomicBool::new(false);
-extern "C" fn on_signal(_: i32) { STOP.store(true, Ordering::SeqCst); }
+static SIG_PIPE_W: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+extern "C" fn on_signal(_: i32) {
+    STOP.store(true, Ordering::SeqCst);
+    let fd = SIG_PIPE_W.load(Ordering::SeqCst);
+    if fd >= 0 { unsafe { libc::write(fd, [1u8].as_ptr() as *const _, 1); } } // wakes poll() so it can sleep without a timeout
+}
+
+/// Watchdog: ffmpeg (frame threads) and VAAPI can block forever on corrupt streams / GPU faults.
+/// The main thread marks when it enters the decoder; a helper checks every 2 s and aborts if one call took > 6 s.
+static DECODING_SINCE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn now_ms(base: &Instant) -> u64 { base.elapsed().as_millis() as u64 + 1 }
+fn spawn_watchdog(base: Instant) {
+    let _ = std::thread::Builder::new().name("watchdog".into()).spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(2));
+        let since = DECODING_SINCE_MS.load(Ordering::Relaxed);
+        if since != 0 && now_ms(&base).saturating_sub(since) > 6000 {
+            eprintln!("wallforge-render: decoder stalled for more than 6 s (corrupt file or GPU fault); exiting");
+            unsafe { libc::_exit(1) };
+        }
+    });
+}
+
+fn fatal(msg: &str) -> ! { eprintln!("wallforge-render: {msg}"); std::process::exit(1) }
 
 struct Args {
     output: String,
@@ -30,17 +53,18 @@ struct Args {
     force_sw: bool,
     volume: u32,
     silent: bool,
+    check: bool,
 }
 
 fn usage() -> ! {
     eprintln!("usage: wallforge-render --output NAME --bg <dir|video> [--scaling fill|fit|stretch] [--fps N] \
-               [--layer background|bottom|top|overlay] [--silent] [--volume N] [--duration SECS] [--software]");
+               [--layer background|bottom|top|overlay] [--silent] [--volume N] [--duration SECS] [--software]\n       wallforge-render --check <dir|video>   (probe, print one JSON line, no window)");
     std::process::exit(2)
 }
 
 fn parse_args() -> Args {
     let mut a = Args { output: String::new(), bg: PathBuf::new(), scaling: Scaling::Fill, fps: 30.0,
-        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false };
+        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false, check: false };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| usage());
@@ -56,9 +80,11 @@ fn parse_args() -> Args {
             "--volume" => a.volume = val().parse::<u32>().unwrap_or_else(|_| usage()).min(100),
             "--silent" => a.silent = true,
             "--software" => a.force_sw = true,
+            "--check" => { a.check = true; a.bg = PathBuf::from(val()); }
             _ => usage(),
         }
     }
+    if a.check { return a; }
     if a.output.is_empty() || a.bg.as_os_str().is_empty() || a.fps <= 0.0 { usage() }
     a
 }
@@ -144,8 +170,42 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
 }
 
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        let m = info.payload().downcast_ref::<&str>().map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned()).unwrap_or_else(|| "panic".into());
+        let th = std::thread::current();
+        let loc = info.location().map(|l| format!(" ({}:{})", l.file().rsplit('/').next().unwrap_or(""), l.line())).unwrap_or_default();
+        let line = m.lines().next().unwrap_or("panic");
+        if th.name() == Some("audio") {
+            eprintln!("wallforge-render: audio thread failed: {line}{loc}; continuing without audio");
+        } else {
+            eprintln!("wallforge-render: fatal: {line}{loc}");
+            std::process::exit(1);
+        }
+    }));
     let args = parse_args();
-    let video_path = resolve_video(&args.bg).unwrap_or_else(|e| { eprintln!("wallforge-render: {e}"); std::process::exit(1) });
+    let video_path = resolve_video(&args.bg).unwrap_or_else(|e| {
+        if args.check { println!("{}", serde_json::json!({"ok": false, "error": e})); }
+        fatal(&e)
+    });
+    if args.check {
+        let b = Instant::now();
+        spawn_watchdog(b);
+        DECODING_SINCE_MS.store(now_ms(&b), Ordering::Relaxed);
+        match check::probe(&video_path) {
+            Ok(v) => { println!("{v}"); return; }
+            Err(e) => { println!("{}", serde_json::json!({"ok": false, "error": e})); fatal(&e) }
+        }
+    }
+    // open the decoder first: bad files fail fast, before any Wayland / EGL work
+    let mut dec = video::Decoder::open(&video_path, !args.force_sw, args.fps).unwrap_or_else(|e| fatal(&e));
+    if std::env::var_os("WALLFORGE_FFMPEG_LOG").is_none() { unsafe { ffmpeg_sys_next::av_log_set_level(ffmpeg_sys_next::AV_LOG_QUIET) }; }
+    let wd_base = Instant::now();
+    spawn_watchdog(wd_base);
+    let mut sig_pipe = [0i32; 2];
+    unsafe {
+        if libc::pipe2(sig_pipe.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) == 0 { SIG_PIPE_W.store(sig_pipe[1], Ordering::SeqCst); }
+    }
     unsafe {
         let mut sa: libc::sigaction = std::mem::zeroed();
         sa.sa_sigaction = on_signal as *const () as usize;
@@ -224,8 +284,8 @@ fn main() {
         assert!(eglMakeCurrent(dpy, esurf, esurf, ctx) != 0, "eglMakeCurrent");
         eglSwapInterval(dpy, 0);
     }
+    set_opaque(&compositor, &surface, &qh, app.size);
     let mut gfx = Gfx::new(dpy, args.scaling);
-    let mut dec = video::Decoder::open(&video_path, !args.force_sw, args.fps).unwrap_or_else(|e| { eprintln!("wallforge-render: {e}"); std::process::exit(1) });
     eprintln!("wallforge-render: {}x{} @{:.2}fps decode={} dmabuf={} -> {}x{} @{} cap",
         dec.width, dec.height, dec.fps, if dec.hw { "vaapi" } else { "software" }, gfx.can_dmabuf, bw, bh, args.fps);
 
@@ -233,16 +293,25 @@ fn main() {
     if audio.is_some() { eprintln!("wallforge-render: audio on (volume {})", args.volume); }
     let mut a_paused = true;
     let test_pause = std::env::var_os("WALLFORGE_TEST_PAUSE").is_some();
+    let dbg = std::env::var_os("WALLFORGE_DEBUG").is_some();
     let mut held_cb = false;
     let period = Duration::from_secs_f64(1.0 / args.fps);
     let start = Instant::now();
     let (mut base_wall, mut base_pts, mut last_render) = (Instant::now(), 0.0f64, Instant::now());
-    let mut next_due = Instant::now();
+    let mut next_slot = Instant::now(); // fps-cap pacing grid
+    let mut next_due = Instant::now();  // earliest wall time something new can be shown
     let mut ring: VecDeque<video::Frame> = VecDeque::new();
     let mut shown = 0u64;
     let mut first = true;
     let mut dirty = true;
     let mut no_frame_polls = 0;
+    let mut exit_code = 0;
+    let mut last_present = Instant::now();
+
+    let sw_fallback = |why: &str, dec: &mut video::Decoder| -> bool {
+        eprintln!("wallforge-render: {why}, falling back to software decode");
+        match video::Decoder::open(&video_path, false, args.fps) { Ok(d) => { *dec = d; true } Err(e) => { eprintln!("wallforge-render: software reopen failed: {e}"); false } }
+    };
 
     while !STOP.load(Ordering::SeqCst) && !app.closed {
         if let Some(d) = args.duration { if start.elapsed().as_secs_f64() >= d { break; } }
@@ -259,6 +328,7 @@ fn main() {
             bw = nw; bh = nh;
             if let Some(v) = &viewport { if _fs.is_some() && app.frac > 0 { v.set_destination(app.size.0, app.size.1); } }
             win.resize(bw, bh, 0, 0);
+            set_opaque(&compositor, &surface, &qh, app.size);
             eprintln!("wallforge-render: surface {}x{} logical -> {}x{} physical (scale {})", app.size.0, app.size.1, bw, bh, if app.frac > 0 { app.frac as f64 / 120.0 } else { scale as f64 });
             dirty = true;
         }
@@ -267,26 +337,38 @@ fn main() {
             if now.duration_since(last_render) > Duration::from_millis(500) && !first {
                 base_wall = now; // woke from pause: continue where we stopped, do not fast-forward
                 base_pts = ring.back().map(|f| f.pts).unwrap_or(0.0);
+                next_slot = now;
             }
             last_render = now;
             let target = base_pts + now.duration_since(base_wall).as_secs_f64();
+            let t0 = Instant::now();
+            DECODING_SINCE_MS.store(now_ms(&wd_base), Ordering::Relaxed);
             let mut newf = dec.advance(if first { 0.0 } else { target });
-            if newf.is_none() && dec.hw && shown == 0 {
-                no_frame_polls += 1;
-                if no_frame_polls > 3 {
-                    eprintln!("wallforge-render: VAAPI produced no frames, falling back to software");
-                    dec = video::Decoder::open(&video_path, false, args.fps).expect("sw reopen");
-                    base_wall = Instant::now(); base_pts = 0.0;
-                }
+            DECODING_SINCE_MS.store(0, Ordering::Relaxed);
+            if dbg && t0.elapsed() > Duration::from_millis(8) { eprintln!("wallforge-render: slow advance {:.1} ms at media {:.2}s", t0.elapsed().as_secs_f64() * 1e3, target); }
+            if newf.is_none() && dec.hw && shown == 0 && (dec.failed || { no_frame_polls += 1; no_frame_polls > 3 }) {
+                if !sw_fallback("VAAPI produced no frames", &mut dec) { exit_code = 1; break; }
+                base_wall = Instant::now(); base_pts = 0.0; no_frame_polls = 0;
+                newf = dec.advance(0.0);
+            } else if newf.is_none() && dec.hw && dec.map_fails > 3 {
+                if !sw_fallback("VAAPI frame export failed", &mut dec) { exit_code = 1; break; }
+                base_wall = Instant::now(); base_pts = 0.0; ring.clear(); dec.map_fails = 0;
+                newf = dec.advance(0.0);
+            }
+            if dec.failed && newf.is_none() {
+                eprintln!("wallforge-render: video cannot be decoded (corrupt or unsupported); exiting");
+                exit_code = 1; break;
             }
             let mut changed = false;
             if let Some(mut f) = newf.take() {
                 if let Err(e) = gfx.upload(&f) {
-                    eprintln!("wallforge-render: hardware import failed ({e}); falling back to software decode");
-                    dec = video::Decoder::open(&video_path, false, args.fps).expect("sw reopen");
+                    if !sw_fallback(&format!("hardware import failed ({e})"), &mut dec) { exit_code = 1; break; }
                     base_wall = Instant::now(); base_pts = 0.0; ring.clear();
-                    f = dec.advance(0.0).expect("sw first frame");
-                    gfx.upload(&f).expect("sw upload");
+                    match dec.advance(0.0) {
+                        Some(f2) => f = f2,
+                        None => { eprintln!("wallforge-render: software decode produced no frame; exiting"); exit_code = 1; break; }
+                    }
+                    if let Err(e) = gfx.upload(&f) { eprintln!("wallforge-render: upload failed ({e}); exiting"); exit_code = 1; break; }
                 }
                 let f_pos = f.pos;
                 ring.push_back(f);
@@ -299,10 +381,19 @@ fn main() {
                 gfx.draw(bw, bh);
                 unsafe { eglSwapBuffers(dpy, esurf); }
                 dirty = false;
-                if first { first = false; base_wall = Instant::now(); base_pts = ring.back().map(|f| f.pts).unwrap_or(0.0); }
+                if dbg && changed { let g = last_present.elapsed(); if g > period * 2 { eprintln!("wallforge-render: present gap {:.1} ms", g.as_secs_f64() * 1e3); } }
+                last_present = Instant::now();
+                if first { first = false; base_wall = Instant::now(); base_pts = ring.back().map(|f| f.pts).unwrap_or(0.0); next_slot = base_wall; }
             }
-            next_due += period;
-            if next_due < now { next_due = now; }
+            // next wake: the cap grid, but no earlier than the next video frame is actually due
+            next_slot += period;
+            if next_slot < now { next_slot = now; }
+            next_due = next_slot;
+            if let Some(p) = dec.next_pts() {
+                let due = base_wall + Duration::from_secs_f64((p - dec.frame_dur() * 0.5 - base_pts).max(0.0));
+                if due > next_due { next_due = due; }
+            }
+            if dec.single && !first { next_due = now + Duration::from_secs(3600); } // still image: nothing to wake for
         }
         if let Some(a) = &audio {
             let want = !first && !app.cb_ready && last_render.elapsed() > Duration::from_millis(400);
@@ -311,13 +402,25 @@ fn main() {
         }
         if let Err(e) = conn.flush() { eprintln!("wallforge-render: lost connection to the compositor ({e}); exiting"); break; }
         if let Some(guard) = queue.prepare_read() {
-            let mut fds = [libc::pollfd { fd: std::os::fd::AsRawFd::as_raw_fd(&guard.connection_fd()), events: libc::POLLIN, revents: 0 }];
-            let timeout_ms: i32 = if app.cb_ready {
-                let d = next_due.saturating_duration_since(Instant::now());
-                (d.as_millis() as i32).min(250).max(0) + if d.subsec_micros() % 1000 > 0 { 1 } else { 0 }
-            } else { 250 }; // paused (no frame callback): sleep, wake only to check signals
-            let r = unsafe { libc::poll(fds.as_mut_ptr(), 1, timeout_ms) };
-            if r > 0 {
+            let mut fds = [libc::pollfd { fd: std::os::fd::AsRawFd::as_raw_fd(&guard.connection_fd()), events: libc::POLLIN, revents: 0 },
+                           libc::pollfd { fd: sig_pipe[0], events: libc::POLLIN, revents: 0 }];
+            // Sleep until the earliest real deadline; with nothing pending (hidden / paused) block with no timer at all.
+            let now = Instant::now();
+            let mut deadline: Option<Instant> = None;
+            let mut upd = |d: Instant| deadline = Some(deadline.map_or(d, |x| x.min(d)));
+            if app.cb_ready { upd(next_due); }
+            else if audio.is_some() && !a_paused { upd(last_render + Duration::from_millis(400)); }
+            if let Some(d) = args.duration { upd(start + Duration::from_secs_f64(d)); }
+            if test_pause {
+                let t = start.elapsed().as_secs_f64();
+                if t < 3.0 { upd(start + Duration::from_secs(3)); } else if t < 7.0 { upd(start + Duration::from_secs(7)); }
+            }
+            let timeout_ms: i32 = match deadline {
+                None => -1,
+                Some(d) => { let r = d.saturating_duration_since(now); (r.as_micros().div_ceil(1000) as i32).clamp(if r.is_zero() { 0 } else { 1 }, 3_600_000) }
+            };
+            let r = unsafe { libc::poll(fds.as_mut_ptr(), 2, timeout_ms) };
+            if r > 0 && fds[0].revents != 0 {
                 if let Err(e) = guard.read() {
                     if !matches!(&e, wayland_client::backend::WaylandError::Io(io) if io.kind() == std::io::ErrorKind::WouldBlock) {
                         eprintln!("wallforge-render: lost connection to the compositor ({e}); exiting"); break;
@@ -336,4 +439,12 @@ fn main() {
     surface.destroy();
     let _ = conn.flush();
     eprintln!("wallforge-render: exit (presented {shown} frames)");
+    if exit_code != 0 { std::process::exit(exit_code); }
+}
+
+fn set_opaque(c: &wl_compositor::WlCompositor, s: &wl_surface::WlSurface, qh: &QueueHandle<App>, size: (i32, i32)) {
+    let r = c.create_region(qh, ());
+    r.add(0, 0, size.0.max(1), size.1.max(1));
+    s.set_opaque_region(Some(&r));
+    r.destroy();
 }

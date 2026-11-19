@@ -42,7 +42,9 @@ impl Audio {
         if volume == 0 { return None; }
         let input = ff::format::input(&path).ok()?;
         input.streams().best(ff::media::Type::Audio)?;
-        let loop_secs = input.duration() as f64 / 1e6;
+        // loop length = the video stream's length when known (the video loops on that), else the container's
+        let vsecs = input.streams().best(ff::media::Type::Video).map(|v| { let tb: f64 = v.time_base().into(); if v.duration() > 0 { v.duration() as f64 * tb } else { 0.0 } }).unwrap_or(0.0);
+        let loop_secs = if vsecs > 0.0 { vsecs } else { input.duration() as f64 / 1e6 };
         drop(input);
         let sh = Arc::new(Shared { paused: AtomicBool::new(true), stop: AtomicBool::new(false), video_pos_us: AtomicI64::new(-1) });
         let (sh2, p) = (sh.clone(), path.to_string());
@@ -50,13 +52,17 @@ impl Audio {
             .spawn(move || { if let Err(e) = run(&p, volume, loop_secs, &sh2) { eprintln!("wallforge-render: audio disabled: {e}"); } }).ok()?;
         Some(Audio { sh, th: Some(th) })
     }
-    pub fn set_paused(&self, p: bool) { self.sh.paused.store(p, Ordering::Relaxed); }
+    pub fn set_paused(&self, p: bool) {
+        self.sh.paused.store(p, Ordering::Relaxed);
+        if let Some(t) = &self.th { t.thread().unpark(); }
+    }
     pub fn set_video_pos(&self, secs: f64) { self.sh.video_pos_us.store((secs * 1e6) as i64, Ordering::Relaxed); }
 }
 
 impl Drop for Audio {
     fn drop(&mut self) {
         self.sh.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = &self.th { t.thread().unpark(); }
         if let Some(t) = self.th.take() { let _ = t.join(); }
     }
 }
@@ -66,7 +72,7 @@ fn wait_unpaused(sh: &Shared, pa: *mut c_void) -> bool {
     while sh.paused.load(Ordering::Relaxed) {
         if sh.stop.load(Ordering::Relaxed) { return false; }
         if !flushed { unsafe { let mut e = 0; pa_simple_flush(pa, &mut e); } flushed = true; }
-        std::thread::sleep(Duration::from_millis(40));
+        std::thread::park_timeout(Duration::from_secs(2)); // unparked on resume/stop: no polling while paused
     }
     !sh.stop.load(Ordering::Relaxed)
 }
@@ -100,6 +106,7 @@ fn run(path: &str, volume: u32, loop_secs: f64, sh: &Shared) -> Result<(), Strin
     let mut out = ff::frame::Audio::empty();
     let mut was_paused = true;
     let mut eof = false;
+    let mut empty_loops = 0u32;
 
     // Write interleaved stereo i16 samples, applying gain; returns false to quit.
     let write = |buf: &mut [i16]| -> bool {
@@ -181,6 +188,7 @@ fn run(path: &str, volume: u32, loop_secs: f64, sh: &Shared) -> Result<(), Strin
 
         if written >= loop_samples || (eof && loop_samples == u64::MAX) {
             // loop: seek back, reset decoder/resampler
+            if written == 0 || (eof && swr.is_none()) { empty_loops += 1; if empty_loops >= 3 { return Err("audio stream could not be decoded".into()); } } else { empty_loops = 0; }
             let _ = input.seek(0, ..0);
             dec.flush();
             swr = None;
