@@ -263,8 +263,8 @@ fn main() {
             (((logical.0 as i64 * frac as i64 + 60) / 120) as i32, ((logical.1 as i64 * frac as i64 + 60) / 120) as i32)
         } else { (logical.0 * scale, logical.1 * scale) }
     };
-    let (mut bw, mut bh) = phys(app.size, app.frac);
-    if let Some(v) = &viewport { if _fs.is_some() && app.frac > 0 { v.set_destination(app.size.0, app.size.1); } }
+    let native = std::env::var("WF_NATIVE").map(|v| v != "0").unwrap_or(false);
+    let ((mut bw, mut bh), mut is_native) = layout(&viewport, _fs.is_some(), app.frac, app.size, phys(app.size, app.frac), (dec.width, dec.height), native, args.scaling);
     let wl_display = conn.backend().display_ptr() as *mut c_void;
     let (dpy, ctx, esurf, win);
     unsafe {
@@ -308,6 +308,7 @@ fn main() {
     let mut no_frame_polls = 0;
     let mut exit_code = 0;
     let mut last_present = Instant::now();
+    let (mut st_to, mut st_ev, mut st_t) = (0u64, 0u64, Instant::now());
 
     let sw_fallback = |why: &str, dec: &mut video::Decoder| -> bool {
         eprintln!("wallforge-render: {why}, falling back to software decode");
@@ -316,6 +317,7 @@ fn main() {
 
     while !STOP.load(Ordering::SeqCst) && !app.closed {
         if let Some(d) = args.duration { if start.elapsed().as_secs_f64() >= d { break; } }
+        if dbg && st_t.elapsed() >= Duration::from_secs(2) { eprintln!("wallforge-render: sleeps {} blocking polls {} shown {} in 2s", st_to, st_ev, shown); st_to = 0; st_ev = 0; st_t = Instant::now(); }
         if let Err(e) = queue.dispatch_pending(&mut app) { eprintln!("wallforge-render: wayland error ({e}); exiting"); break; }
         if test_pause {
             // test hook: pretend the compositor sends no frame callbacks between 3 s and 7 s
@@ -325,9 +327,7 @@ fn main() {
         }
         if app.resized {
             app.resized = false;
-            let (nw, nh) = phys(app.size, app.frac);
-            bw = nw; bh = nh;
-            if let Some(v) = &viewport { if _fs.is_some() && app.frac > 0 { v.set_destination(app.size.0, app.size.1); } }
+            ((bw, bh), is_native) = layout(&viewport, _fs.is_some(), app.frac, app.size, phys(app.size, app.frac), (dec.width, dec.height), native, args.scaling);
             win.resize(bw, bh, 0, 0);
             set_opaque(&compositor, &surface, &qh, app.size);
             eprintln!("wallforge-render: surface {}x{} logical -> {}x{} physical (scale {})", app.size.0, app.size.1, bw, bh, if app.frac > 0 { app.frac as f64 / 120.0 } else { scale as f64 });
@@ -379,7 +379,7 @@ fn main() {
             }
             if changed || dirty {
                 if app.cb_ready { surface.frame(&qh, ()); app.cb_ready = false; }
-                gfx.draw(bw, bh);
+                gfx.draw(bw, bh, is_native);
                 unsafe { eglSwapBuffers(dpy, esurf); }
                 dirty = false;
                 if dbg && changed { let g = last_present.elapsed(); if g > period * 2 { eprintln!("wallforge-render: present gap {:.1} ms", g.as_secs_f64() * 1e3); } }
@@ -420,8 +420,14 @@ fn main() {
                 None => -1,
                 Some(d) => { let r = d.saturating_duration_since(now); (r.as_micros().div_ceil(1000) as i32).clamp(if r.is_zero() { 0 } else { 1 }, 3_600_000) }
             };
-            let r = unsafe { libc::poll(fds.as_mut_ptr(), 2, timeout_ms) };
-            if r > 0 && fds[0].revents != 0 {
+            // Frame just presented and the next one is not due yet: the compositor's events (frame done, buffer
+            // release) would each wake us. Sleep on the signal pipe only until the frame is due, then read them all at once.
+            let sleep_only = !app.cb_ready && !first && next_due > now && last_render.elapsed() < period * 3;
+            let timeout_ms = if sleep_only { let r = next_due - now; let t = r.as_micros().div_ceil(1000).clamp(1, 3_600_000) as i32; if timeout_ms >= 0 { t.min(timeout_ms) } else { t } } else { timeout_ms };
+            let r = unsafe { libc::poll(fds.as_mut_ptr().add(sleep_only as usize), 2 - sleep_only as libc::nfds_t, timeout_ms) };
+            if dbg { if sleep_only { st_to += 1 } else { st_ev += 1 } }
+            if sleep_only && r >= 0 { fds[0].revents = libc::POLLIN; }
+            if (r > 0 || sleep_only) && fds[0].revents != 0 {
                 if let Err(e) = guard.read() {
                     if !matches!(&e, wayland_client::backend::WaylandError::Io(io) if io.kind() == std::io::ErrorKind::WouldBlock) {
                         eprintln!("wallforge-render: lost connection to the compositor ({e}); exiting"); break;
@@ -448,4 +454,22 @@ fn set_opaque(c: &wl_compositor::WlCompositor, s: &wl_surface::WlSurface, qh: &Q
     r.add(0, 0, size.0.max(1), size.1.max(1));
     s.set_opaque_region(Some(&r));
     r.destroy();
+}
+
+/// Buffer size + viewport setup. In "native" mode the buffer has the video's own size (when smaller than the
+/// physical output) and the compositor scales/crops through wp_viewport, so the shader draws fewer pixels.
+fn layout(viewport: &Option<wp_viewport::WpViewport>, fs_ok: bool, frac: u32, logical: (i32, i32), phys: (i32, i32),
+          video: (u32, u32), native: bool, scaling: Scaling) -> ((i32, i32), bool) {
+    let Some(v) = viewport else { return (phys, false) };
+    if native && scaling == Scaling::Fill && (video.0 as i64 * video.1 as i64) < (phys.0 as i64 * phys.1 as i64) && logical.0 > 0 && logical.1 > 0 {
+        let (vw, vh) = (video.0 as f64, video.1 as f64);
+        let oa = logical.0 as f64 / logical.1 as f64;
+        let (cw, ch) = if vw / vh > oa { (vh * oa, vh) } else { (vw, vw / oa) };
+        v.set_source((vw - cw) / 2.0, (vh - ch) / 2.0, cw, ch);
+        v.set_destination(logical.0, logical.1);
+        return ((video.0 as i32, video.1 as i32), true);
+    }
+    v.set_source(-1.0, -1.0, -1.0, -1.0);
+    if fs_ok && frac > 0 { v.set_destination(logical.0, logical.1); } else { v.set_destination(-1, -1); }
+    (phys, false)
 }

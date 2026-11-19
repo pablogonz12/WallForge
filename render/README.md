@@ -14,6 +14,7 @@ wallforge-render --output DP-2 --bg <wallpaper dir | video file> \
   If VAAPI or the import fails it falls back to software decode (ffmpeg, 4 threads; Y/U/V planes uploaded as R8 textures).
   `--software` forces software decode.
 - `--fps` caps presentation (default 30); extra video frames are dropped without upload/export.
+- Idle wakeups: after a present the loop sleeps until the next frame is due and then reads all compositor events at once; audio writes 0.2 s chunks (0.4 s pulse buffer).
 - Presentation is paced by `wl_surface.frame` callbacks: when the surface is hidden or the screen is off
   no callback arrives, so decoding stops (no timers: the loop blocks in poll until a frame is due or a signal arrives). Playback resumes where it stopped.
 - Surface: all anchors, exclusive zone -1, empty input region (clicks pass through). Output resize handled.
@@ -28,7 +29,8 @@ Needs ffmpeg dev libs (libav*), libEGL, libwayland-client, libva (runtime). No p
 
 ## Known limits
 Untagged video is assumed BT.709 when height >= 720.
-- Looping drains the decoder and seeks to 0 (tiny hitch possible on slow disks).
+- Looping drains the decoder and seeks to 0; audio loops gaplessly (resampler tail flushed, pulse buffer covers the seek).
+- `WF_NATIVE=1`: buffer at the video size, compositor crops/scales via wp_viewport (no power gain measured, off by default). `WALLFORGE_AUDIO_DUMP=file` writes the PCM sent to the audio server.
 - Only `NV12`/`P010`-style 2-layer VAAPI exports are imported.
 
 ## Check mode

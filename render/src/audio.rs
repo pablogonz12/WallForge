@@ -11,6 +11,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 const RATE: u32 = 48000;
+const LATENCY: f64 = 0.4; // pulse buffer (s): big buffer + big writes = few wakeups
+const CHUNK: usize = 9600; // samples per write (0.2 s)
 
 #[repr(C)]
 struct SampleSpec { format: c_int, rate: u32, channels: u8 }
@@ -87,7 +89,7 @@ fn run(path: &str, volume: u32, loop_secs: f64, sh: &Shared) -> Result<(), Strin
 
     let ss = SampleSpec { format: 3 /* S16LE */, rate: RATE, channels: 2 };
     let bytes_per_s = (RATE * 4) as u32;
-    let attr = BufferAttr { maxlength: u32::MAX, tlength: bytes_per_s / 10, prebuf: u32::MAX, minreq: u32::MAX, fragsize: u32::MAX };
+    let attr = BufferAttr { maxlength: u32::MAX, tlength: (bytes_per_s as f64 * LATENCY) as u32, prebuf: u32::MAX, minreq: bytes_per_s / 10, fragsize: u32::MAX };
     let (name, sname) = (CString::new("wallforge-render").unwrap(), CString::new("wallpaper").unwrap());
     let mut err = 0;
     let pa = unsafe { pa_simple_new(ptr::null(), name.as_ptr(), 1, ptr::null(), sname.as_ptr(), &ss, ptr::null(), &attr, &mut err) };
@@ -98,7 +100,8 @@ fn run(path: &str, volume: u32, loop_secs: f64, sh: &Shared) -> Result<(), Strin
     let gain = (volume.min(100) as f32 / 100.0).powi(2); // perceptual-ish curve
 
     let dbg = std::env::var_os("WALLFORGE_AUDIO_DEBUG").is_some();
-    let latency = 0.1f64; // tlength
+    let latency = LATENCY;
+    let mut acc: Vec<i16> = Vec::new();
     let mut swr: Option<ff::software::resampling::Context> = None;
     let mut written: u64 = 0; // samples (per channel) written this loop
     let mut grace = 0u32; // chunks to wait before drift checks (after start/resume/loop)
@@ -108,9 +111,11 @@ fn run(path: &str, volume: u32, loop_secs: f64, sh: &Shared) -> Result<(), Strin
     let mut eof = false;
     let mut empty_loops = 0u32;
 
+    let dump = std::env::var_os("WALLFORGE_AUDIO_DUMP").and_then(|p| std::fs::File::create(p).ok()).map(std::sync::Mutex::new);
     // Write interleaved stereo i16 samples, applying gain; returns false to quit.
     let write = |buf: &mut [i16]| -> bool {
         if gain < 0.999 { for s in buf.iter_mut() { *s = (*s as f32 * gain) as i16; } }
+        if let Some(f) = &dump { use std::io::Write; let b: Vec<u8> = buf.iter().flat_map(|s| s.to_le_bytes()).collect(); let _ = f.lock().unwrap().write_all(&b); }
         let mut e = 0;
         unsafe { pa_simple_write(pa.0, buf.as_ptr() as *const c_void, buf.len() * 2, &mut e) >= 0 }
     };
@@ -120,10 +125,10 @@ fn run(path: &str, volume: u32, loop_secs: f64, sh: &Shared) -> Result<(), Strin
         if sh.paused.load(Ordering::Relaxed) {
             if !wait_unpaused(sh, pa.0) { return Ok(()); }
         }
-        if was_paused { was_paused = false; grace = 50; }
+        if was_paused { was_paused = false; grace = 6; acc.clear(); }
 
         // Pull one chunk of decoded, resampled samples (or silence padding at EOF).
-        let mut chunk: Vec<i16>;
+        let chunk: Vec<i16>;
         if !eof {
             match dec.receive_frame(&mut frame) {
                 Ok(()) => {
@@ -133,6 +138,9 @@ fn run(path: &str, volume: u32, loop_secs: f64, sh: &Shared) -> Result<(), Strin
                             ff::format::Sample::I16(ff::format::sample::Type::Packed), ff::ChannelLayout::STEREO, RATE).map_err(|e| e.to_string())?);
                     }
                     if frame.channel_layout().is_empty() { frame.set_channel_layout(ff::ChannelLayout::default(frame.channels() as i32)); }
+                    // output capacity must cover the rate ratio, else the resampler keeps the surplus (growing delay)
+                    let cap = frame.samples() * RATE as usize / frame.rate().max(1) as usize + 64;
+                    out = ff::frame::Audio::new(ff::format::Sample::I16(ff::format::sample::Type::Packed), cap, ff::ChannelLayout::STEREO);
                     if swr.as_mut().unwrap().run(&frame, &mut out).is_err() { continue; }
                     let n = out.samples();
                     if n == 0 { continue; }
@@ -143,19 +151,33 @@ fn run(path: &str, volume: u32, loop_secs: f64, sh: &Shared) -> Result<(), Strin
                     let mut pkt = ff::Packet::empty();
                     match pkt.read(&mut input) {
                         Ok(()) => { if pkt.stream() == idx { let _ = dec.send_packet(&pkt); } }
-                        Err(ff::Error::Eof) => { let _ = dec.send_eof(); }
-                        Err(_) => { eof = true; }
+                        Err(ff::Error::Eof) => { if dbg { eprintln!("audio: pkt eof at written {written}"); } let _ = dec.send_eof(); }
+                        Err(e) => { if dbg { eprintln!("audio: read err {e:?} at written {written}"); } eof = true; }
                     }
                     continue;
                 }
-                Err(_) => { eof = true; continue; }
+                Err(e) => {
+                    if dbg { eprintln!("audio: decode err {e:?} at written {written}"); }
+                    // drain the resampler's tail so the loop keeps its full length
+                    if let Some(sw) = swr.as_mut() {
+                        let mut t = ff::frame::Audio::new(ff::format::Sample::I16(ff::format::sample::Type::Packed), 8192, ff::ChannelLayout::STEREO);
+                        if sw.flush(&mut t).is_ok() && t.samples() > 0 {
+                            acc.extend(t.data(0)[..t.samples() * 4].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])));
+                        }
+                    }
+                    eof = true; continue;
+                }
             }
         } else {
             // Audio shorter than the video loop: pad with silence up to the loop length.
-            let n = ((loop_samples - written.min(loop_samples)).min(1024)) as usize;
+            let n = ((loop_samples - written.min(loop_samples)).min(CHUNK as u64)) as usize;
             chunk = vec![0i16; n * 2];
         }
 
+        // Batch small decoder frames into big writes (fewer wakeups).
+        acc.extend_from_slice(&chunk);
+        if acc.len() / 2 < CHUNK && !eof && written + ((acc.len() / 2) as u64) < loop_samples { continue; }
+        let mut chunk = std::mem::take(&mut acc);
         // Truncate at the loop boundary.
         let mut n = chunk.len() / 2;
         let remain = loop_samples.saturating_sub(written) as usize;
@@ -172,12 +194,12 @@ fn run(path: &str, volume: u32, loop_secs: f64, sh: &Shared) -> Result<(), Strin
                 // audio ahead: insert silence
                 let mut sil = vec![0i16; ((d.min(1.0)) * RATE as f64) as usize * 2];
                 if !write(&mut sil) { return Ok(()); }
-                grace = 50;
+                grace = 6;
             } else if d < -0.12 {
                 // audio behind: drop samples
                 let drop_n = ((-d).min(1.0) * RATE as f64) as usize;
-                if drop_n >= n { written += n as u64; grace = 20; if written >= loop_samples { /* fallthrough to loop below */ } else { continue; } }
-                else { chunk.drain(..drop_n * 2); written += drop_n as u64; n -= drop_n; grace = 50; }
+                if drop_n >= n { written += n as u64; grace = 3; if written >= loop_samples { /* fallthrough to loop below */ } else { continue; } }
+                else { chunk.drain(..drop_n * 2); written += drop_n as u64; n -= drop_n; grace = 6; }
             }
         }
 
@@ -192,7 +214,7 @@ fn run(path: &str, volume: u32, loop_secs: f64, sh: &Shared) -> Result<(), Strin
             let _ = input.seek(0, ..0);
             dec.flush();
             swr = None;
-            written = 0; eof = false; grace = 50;
+            written = 0; eof = false; grace = 6; acc.clear();
         }
     }
 }

@@ -143,7 +143,7 @@ impl Gfx {
     }
 
     /// Draw the last uploaded frame to the currently bound surface.
-    pub fn draw(&self, out_w: i32, out_h: i32) {
+    pub fn draw(&self, out_w: i32, out_h: i32, native: bool) {
         let Some((w, h, nv12, matrix, full)) = self.cur else { return };
         let (kr, kb) = match matrix { Matrix::Bt709 => (0.2126f32, 0.0722f32), Matrix::Bt601 => (0.299, 0.114), Matrix::Bt2020 => (0.2627, 0.0593) };
         let kg = 1.0 - kr - kb;
@@ -152,11 +152,11 @@ impl Gfx {
             else { ([16.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0], [255.0 / 219.0, 255.0 / 224.0, 255.0 / 224.0]) };
         let va = w as f32 / h as f32;
         let oa = out_w as f32 / out_h as f32;
-        let (sx, sy) = match self.scaling {
+        let (sx, sy) = if native { (1.0, 1.0) } else { match self.scaling {
             Scaling::Stretch => (1.0, 1.0),
             Scaling::Fill => if va > oa { (va / oa, 1.0) } else { (1.0, oa / va) },
             Scaling::Fit => if va > oa { (1.0, oa / va) } else { (va / oa, 1.0) },
-        };
+        } };
         unsafe {
             gl::Viewport(0, 0, out_w, out_h);
             if self.scaling == Scaling::Fit { gl::ClearColor(0.0, 0.0, 0.0, 1.0); gl::Clear(gl::COLOR_BUFFER_BIT); }
