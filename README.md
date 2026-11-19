@@ -55,7 +55,7 @@ Workshop wallpapers themselves are downloaded by the Steam client when you subsc
 ## Requirements
 
 - Python 3.11+, GTK 4, libadwaita 1.5+, PyGObject, Pillow, aiohttp, ffmpeg
-- Rust/cargo to build the renderer (`install.sh` and the first start do it), plus ffmpeg, libva and EGL
+- Rust (cargo) and clang to build the renderer (`install.sh` and the first start do it, about a minute), plus ffmpeg, libva and EGL. Arch: `sudo pacman -S rust clang ffmpeg libva`
 - Steam running, signed in to an account that owns Wallpaper Engine, for Discover > Get
 - A Wayland compositor with layer-shell support (niri, Hyprland, Sway, ...)
 
