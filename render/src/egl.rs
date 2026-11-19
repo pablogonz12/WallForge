@@ -24,6 +24,8 @@ pub const EGL_GREEN_SIZE: EGLint = 0x3023;
 pub const EGL_BLUE_SIZE: EGLint = 0x3022;
 pub const EGL_ALPHA_SIZE: EGLint = 0x3021;
 pub const EGL_CONTEXT_CLIENT_VERSION: EGLint = 0x3098;
+pub const EGL_PBUFFER_BIT: EGLint = 0x1;
+pub const EGL_PLATFORM_SURFACELESS_MESA: EGLenum = 0x31DD;
 pub const EGL_WIDTH: EGLint = 0x3057;
 pub const EGL_HEIGHT: EGLint = 0x3056;
 pub const EGL_EXTENSIONS: EGLint = 0x3055;
@@ -44,6 +46,8 @@ extern "C" {
     pub fn eglChooseConfig(d: EGLDisplay, attr: *const EGLint, cfgs: *mut EGLConfig, n: EGLint, num: *mut EGLint) -> EGLBoolean;
     pub fn eglCreateContext(d: EGLDisplay, c: EGLConfig, share: EGLContext, attr: *const EGLint) -> EGLContext;
     pub fn eglCreatePlatformWindowSurface(d: EGLDisplay, c: EGLConfig, win: *mut c_void, attr: *const EGLAttrib) -> EGLSurface;
+    pub fn eglCreatePbufferSurface(d: EGLDisplay, c: EGLConfig, attr: *const EGLint) -> EGLSurface;
+    pub fn eglGetDisplay(native: *mut c_void) -> EGLDisplay;
     pub fn eglDestroySurface(d: EGLDisplay, s: EGLSurface) -> EGLBoolean;
     pub fn eglMakeCurrent(d: EGLDisplay, dr: EGLSurface, rd: EGLSurface, c: EGLContext) -> EGLBoolean;
     pub fn eglSwapBuffers(d: EGLDisplay, s: EGLSurface) -> EGLBoolean;

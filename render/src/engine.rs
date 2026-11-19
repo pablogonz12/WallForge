@@ -14,9 +14,9 @@ pub use crate::gfx::Scaling;
 enum Blend { Alpha, Additive }
 
 const VS: &str = "#version 300 es
-uniform mat4 mvp; uniform vec2 size; uniform float flip; out vec2 uv;
+uniform mat4 mvp; uniform vec2 size; uniform float flip; uniform vec2 uvs; out vec2 uv;
 void main(){ vec2 p = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));
- uv = vec2(p.x, flip > 0.5 ? p.y : 1.0 - p.y); gl_Position = mvp * vec4((p - 0.5) * size, 0.0, 1.0); }";
+ uv = vec2(p.x, flip > 0.5 ? p.y : 1.0 - p.y) * uvs; gl_Position = mvp * vec4((p - 0.5) * size, 0.0, 1.0); }";
 const FS: &str = "#version 300 es
 precision highp float; in vec2 uv; out vec4 o; uniform sampler2D t; uniform vec4 tint;
 void main(){ vec4 c = texture(t, uv); o = vec4(c.rgb * tint.rgb, c.a * tint.a); }";
@@ -88,15 +88,15 @@ struct Pass {
 
 struct Layer {
     name: String, tex: u32, size: [f32; 2], world: Mat4, color: [f32; 3], alpha: f32, blend: Blend,
-    passes: Vec<Pass>, ping: Option<(Target, Target)>, named: HashMap<String, Target>, px: (i32, i32),
+    uvs: [f32; 2], passes: Vec<Pass>, ping: Option<(Target, Target)>, named: HashMap<String, Target>, px: (i32, i32),
 }
 
 pub struct Engine {
-    layers: Vec<Layer>, prog: u32, u_mvp: i32, u_size: i32, u_tint: i32, u_flip: i32,
+    layers: Vec<Layer>, prog: u32, u_mvp: i32, u_size: i32, u_tint: i32, u_flip: i32, u_uvs: i32,
     vao: u32, view: Mat4, pub clear: [f32; 3], scene_wh: (f32, f32),
     pub animated: bool, pub vram: usize, pub notes: Vec<String>,
     out: (i32, i32), scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
-    t0: std::time::Instant,
+    t0: std::time::Instant, time_override: Option<f32>,
 }
 
 pub fn view_matrix(sw: f32, sh: f32, ow: i32, oh: i32, scaling: Scaling) -> (Mat4, f32, f32) {
@@ -134,12 +134,14 @@ impl Engine {
             gl::EnableVertexAttribArray(1); gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, 20, 12 as *const _);
             gl::Disable(gl::DEPTH_TEST); gl::Disable(gl::DITHER); gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
         }
-        let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_flip: loc(prog, "flip"),
+        let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"),
             vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![],
-            out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now() };
+            out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None };
         e.rebuild();
         Ok(e)
     }
+
+    pub fn set_time(&mut self, t: Option<f32>) { self.time_override = t; }
 
     pub fn resize(&mut self, out: (i32, i32)) { if out != self.out { self.out = out; self.rebuild(); } }
 
@@ -169,7 +171,7 @@ impl Engine {
             let gt = match tex::upload(&t, px.0 as u32, px.1 as u32, &meta, s3tc) { Ok(g) => g, Err(e) => { self.note(format!("layer '{name}': {e}, skipped")); continue } };
             self.vram += gt.bytes;
             let world = world_of(&self.scene.objects, i, 0);
-            let mut layer = Layer { name: name.clone(), tex: gt.id, size, world, color, alpha, blend: blend_of(blend_o.as_deref().unwrap_or(&def.material.blending)),
+            let mut layer = Layer { name: name.clone(), tex: gt.id, size, world, color, alpha, uvs: gt.uv, blend: blend_of(blend_o.as_deref().unwrap_or(&def.material.blending)),
                 passes: vec![], ping: None, named: HashMap::new(), px };
             if def.material.blending == "additive" { layer.blend = Blend::Additive; }
             // effects
@@ -287,7 +289,7 @@ impl Engine {
     }
 
     pub fn draw(&mut self) {
-        let t = self.t0.elapsed().as_secs_f32();
+        let t = self.time_override.unwrap_or_else(|| self.t0.elapsed().as_secs_f32());
         unsafe {
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
             gl::Viewport(0, 0, self.out.0, self.out.1);
@@ -308,7 +310,7 @@ impl Engine {
                 gl::UniformMatrix4fv(self.u_mvp, 1, gl::FALSE, mvp.as_ptr());
                 gl::Uniform2f(self.u_size, l.size[0], l.size[1]);
                 gl::Uniform4f(self.u_tint, l.color[0], l.color[1], l.color[2], l.alpha);
-                gl::Uniform1f(self.u_flip, 0.0);
+                gl::Uniform1f(self.u_flip, 0.0); gl::Uniform2f(self.u_uvs, l.uvs[0], l.uvs[1]);
                 gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, src_tex);
                 gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
                 gl::Disable(gl::BLEND);
@@ -329,7 +331,7 @@ impl Engine {
             gl::UniformMatrix4fv(self.u_mvp, 1, gl::FALSE, scene::ident().as_ptr());
             gl::Uniform2f(self.u_size, 1.0, 1.0);
             gl::Uniform4f(self.u_tint, 1.0, 1.0, 1.0, 1.0);
-            gl::Uniform1f(self.u_flip, 1.0);
+            gl::Uniform1f(self.u_flip, 1.0); gl::Uniform2f(self.u_uvs, l.uvs[0], l.uvs[1]);
             gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, l.tex);
             gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
         }

@@ -53,6 +53,8 @@ pub fn run(args: Args) {
     }
     for w in &scn.warnings { eprintln!("wallforge-render: note: {w}"); }
 
+    if let Some(path) = args.screenshot.clone() { return screenshot(&args, vfs, scn, &path); }
+
     let mut sig_pipe = [0i32; 2];
     unsafe {
         if libc::pipe2(sig_pipe.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) == 0 { SIG_PIPE_W.store(sig_pipe[1], Ordering::SeqCst); }
@@ -206,3 +208,54 @@ pub fn run(args: Args) {
 
 #[allow(dead_code)]
 fn _unused(_: zwlr_layer_surface_v1::Anchor) {}
+
+/// Headless render: EGL pbuffer (surfaceless Mesa platform, else default display), N frames, PNG dump, no window.
+fn screenshot(args: &Args, vfs: Vfs, scn: Scene, path: &Path) {
+    let (w, h) = args.shot_size;
+    let (dpy, ctx, surf);
+    unsafe {
+        let mut d = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, std::ptr::null_mut(), std::ptr::null());
+        let (mut ma, mut mi) = (0, 0);
+        if d.is_null() || eglInitialize(d, &mut ma, &mut mi) == 0 {
+            d = eglGetDisplay(std::ptr::null_mut());
+            if d.is_null() || eglInitialize(d, &mut ma, &mut mi) == 0 { fatal("EGL init failed (headless)"); }
+        }
+        dpy = d;
+        eglBindAPI(EGL_OPENGL_ES_API);
+        let ca = [EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+                  EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8, EGL_NONE];
+        let mut cfg: EGLConfig = std::ptr::null_mut(); let mut n = 0;
+        if eglChooseConfig(dpy, ca.as_ptr(), &mut cfg, 1, &mut n) == 0 || n == 0 { fatal("no EGL pbuffer config"); }
+        let cx = [EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE];
+        ctx = eglCreateContext(dpy, cfg, std::ptr::null_mut(), cx.as_ptr());
+        if ctx.is_null() { fatal("eglCreateContext"); }
+        let pa = [EGL_WIDTH, w, EGL_HEIGHT, h, EGL_NONE];
+        surf = eglCreatePbufferSurface(dpy, cfg, pa.as_ptr());
+        if surf.is_null() || eglMakeCurrent(dpy, surf, surf, ctx) == 0 { fatal("pbuffer surface / eglMakeCurrent"); }
+    }
+    gl::load_with(|n| proc_addr(n) as *const _);
+    let mut engine = Engine::new(vfs, scn, (w, h), args.scaling).unwrap_or_else(|e| fatal(&e));
+    // two warm-up frames at t-ε so ping-pong/time-dependent state settles, last frame at the requested time
+    let t = args.shot_time;
+    for i in 0..3 {
+        engine.set_time(Some(if i < 2 { (t - 0.05 * (2 - i) as f32).max(0.0) } else { t }));
+        engine.tick();
+        engine.draw();
+    }
+    let mut px = vec![0u8; (w * h * 4) as usize];
+    unsafe {
+        gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+        gl::Finish();
+        gl::ReadPixels(0, 0, w, h, gl::RGBA, gl::UNSIGNED_BYTE, px.as_mut_ptr() as *mut _);
+    }
+    let row = (w * 4) as usize;
+    let mut flipped = Vec::with_capacity(px.len());
+    for y in (0..h as usize).rev() { flipped.extend_from_slice(&px[y * row..(y + 1) * row]); }
+    for p in flipped.chunks_mut(4) { p[3] = 255; }
+    match image::save_buffer(path, &flipped, w as u32, h as u32, image::ColorType::Rgba8) {
+        Ok(()) => eprintln!("wallforge-render: screenshot {} ({}x{}, t={:.2}s)", path.display(), w, h, t),
+        Err(e) => fatal(&format!("writing {}: {e}", path.display())),
+    }
+    drop(engine);
+    unsafe { eglMakeCurrent(dpy, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()); eglDestroySurface(dpy, surf); }
+}

@@ -64,6 +64,9 @@ struct Args {
     assets_dir: Option<PathBuf>,
     props: Vec<(String, String)>,
     make_test: Option<PathBuf>,
+    screenshot: Option<PathBuf>,
+    shot_size: (i32, i32),
+    shot_time: f32,
 }
 
 fn usage() -> ! {
@@ -74,7 +77,7 @@ fn usage() -> ! {
 
 fn parse_args() -> Args {
     let mut a = Args { output: String::new(), bg: PathBuf::new(), scaling: Scaling::Fill, fps: 30.0,
-        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false, check: false, assets_dir: None, props: vec![], make_test: None };
+        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false, check: false, assets_dir: None, props: vec![], make_test: None, screenshot: None, shot_size: (1920, 1080), shot_time: 0.0 };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| usage());
@@ -92,13 +95,16 @@ fn parse_args() -> Args {
             "--software" => a.force_sw = true,
             "--assets-dir" => a.assets_dir = Some(PathBuf::from(val())),
             "--set-property" => { let v = val(); match v.split_once('=') { Some((k, x)) => a.props.push((k.to_string(), x.to_string())), None => usage() } }
+            "--screenshot" => a.screenshot = Some(PathBuf::from(val())),
+            "--screenshot-size" => { let v = val(); match v.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))) { Some(s) => a.shot_size = s, None => usage() } }
+            "--screenshot-time" => a.shot_time = val().parse().unwrap_or_else(|_| usage()),
             "--make-test-scene" => { a.make_test = Some(PathBuf::from(val())); }
             "--check" => { a.check = true; a.bg = PathBuf::from(val()); }
             _ => usage(),
         }
     }
     if a.check || a.make_test.is_some() { return a; }
-    if a.output.is_empty() || a.bg.as_os_str().is_empty() || a.fps <= 0.0 { usage() }
+    if (a.output.is_empty() && a.screenshot.is_none()) || a.bg.as_os_str().is_empty() || a.fps <= 0.0 { usage() }
     a
 }
 

@@ -203,7 +203,12 @@ const GL_DXT1: u32 = 0x83F1; // RGBA S3TC DXT1
 const GL_DXT3: u32 = 0x83F2;
 const GL_DXT5: u32 = 0x83F3;
 
-pub struct GlTex { pub id: u32, pub w: u32, pub h: u32, pub bytes: usize, pub compressed: bool, pub flags: u32, pub src: (u32, u32) }
+pub struct GlTex { pub id: u32, pub w: u32, pub h: u32, pub bytes: usize, pub compressed: bool, pub flags: u32, pub src: (u32, u32), pub uv: [f32; 2] }
+
+/// Fraction of a (power-of-two padded) texture that holds the image: UV scale for the quad.
+pub fn uv_scale(img: (u32, u32), tex: (u32, u32)) -> [f32; 2] {
+    [(img.0.max(1) as f32 / tex.0.max(1) as f32).min(1.0), (img.1.max(1) as f32 / tex.1.max(1) as f32).min(1.0)]
+}
 
 pub fn has_s3tc() -> bool {
     unsafe {
@@ -236,6 +241,7 @@ pub fn upload(t: &Tex, want_w: u32, want_h: u32, meta: &TexMeta, s3tc: bool) -> 
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAX_LEVEL, 0);
     };
     let src = (t.img_w.max(1), t.img_h.max(1));
+    let mut uv = [1.0f32, 1.0];
     match &t.payload {
         Payload::Mp4(_) => return Err("tex: embedded video textures are not supported".into()),
         Payload::Raw { fmt, mips } if !mips.is_empty() => {
@@ -243,6 +249,7 @@ pub fn upload(t: &Tex, want_w: u32, want_h: u32, meta: &TexMeta, s3tc: bool) -> 
             let mut li = 0;
             for (i, m) in mips.iter().enumerate() { if m.w >= want_w && m.h >= want_h { li = i; } }
             let m = &mips[li];
+            uv = uv_scale((t.img_w, t.img_h), (mips[0].w, mips[0].h));
             let (mut w, mut h, mut data, mut fm) = (m.w, m.h, m.data.clone(), *fmt);
             let is_dxt = matches!(fm, Fmt::Dxt1 | Fmt::Dxt3 | Fmt::Dxt5);
             // no smaller mip stored and a big reduction wanted: shrink on the CPU (decode DXT first)
@@ -286,7 +293,7 @@ pub fn upload(t: &Tex, want_w: u32, want_h: u32, meta: &TexMeta, s3tc: bool) -> 
             bytes = w as usize * h as usize * 4; ow = w; oh = h;
         }
     }
-    Ok(GlTex { id, w: ow, h: oh, bytes, compressed, flags, src })
+    Ok(GlTex { id, w: ow, h: oh, bytes, compressed, flags, src, uv })
 }
 
 // ---------------- synthetic generators (tests + --make-test-scene) ----------------
