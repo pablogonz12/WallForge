@@ -1,0 +1,45 @@
+# Maintainer: pgm1207 <pgm1207@users.noreply.github.com>
+pkgname=wallforge-git
+_pkgname=wallforge
+pkgver=r0.0000000
+pkgrel=1
+pkgdesc='GTK4 front end for linux-wallpaperengine: library, settings, Workshop browser, per-monitor control'
+arch=('any')
+url='https://github.com/pgm1207/wallforge'
+license=('MIT')
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'python-pillow' 'python-aiohttp' 'git')
+makedepends=('git')
+optdepends=('linux-wallpaperengine-git: the wallpaper engine itself (or another linux-wallpaperengine package)'
+            'steam: subscribe to Workshop wallpapers and fetch Wallpaper Engine assets'
+            'ffmpeg: still frames for palette sync'
+            'matugen: palette sync'
+            'wallust: palette sync'
+            'python-pywal: palette sync')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+source=("git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_pkgname"
+  printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+package() {
+  cd "$_pkgname"
+  install -d "$pkgdir/usr/lib/$_pkgname"
+  cp -r wallforge "$pkgdir/usr/lib/$_pkgname/"
+  find "$pkgdir/usr/lib/$_pkgname" -name __pycache__ -prune -exec rm -rf {} +
+  printf 'COMMIT = "%s"\n' "$(git rev-parse HEAD)" > "$pkgdir/usr/lib/$_pkgname/wallforge/_build.py"
+
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/wallforge" <<'WRAP'
+#!/bin/sh
+exec env PYTHONPATH=/usr/lib/wallforge python3 -m wallforge "$@"
+WRAP
+
+  sed 's|@EXEC@|wallforge|' data/dev.wallforge.Wallforge.desktop.in |
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/dev.wallforge.Wallforge.desktop"
+  install -Dm644 assets/wallforge.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/dev.wallforge.Wallforge.svg"
+  install -Dm644 assets/wallforge-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/dev.wallforge.Wallforge-symbolic.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

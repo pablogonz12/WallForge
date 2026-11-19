@@ -4,8 +4,10 @@ from __future__ import annotations
 import hashlib
 import os
 import random
+import shutil
 import sys
 import threading
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -17,7 +19,8 @@ gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
-from . import assets, config, engine, library, monitors, paths, theme, workshop  # noqa: E402
+from . import assets, config, engine, library, monitors, paths, theme, updater, workshop  # noqa: E402
+from . import __version__  # noqa: E402
 from .props import PropertyEditor  # noqa: E402
 
 APP_ID = "dev.wallforge.Wallforge"
@@ -127,6 +130,8 @@ class Window(Adw.ApplicationWindow):
         self.reload_library()
         self._check_setup()
         self.refresh_playing()
+        if self.cfg.data["check_updates"] and time.time() - self.cfg.data["last_update_check"] > 86400:
+            GLib.timeout_add_seconds(5, lambda: (self.check_update(quiet=True), False)[1])
         GLib.timeout_add_seconds(4, self._watch)
         GLib.timeout_add_seconds(3, self._poll_playing)
 
@@ -407,6 +412,45 @@ class Window(Adw.ApplicationWindow):
                 self.toasts.add_toast(t)
         self.refresh_playing()
         return False
+
+    def check_update(self, quiet=False):
+        def work():
+            try:
+                res = updater.check()
+                err = ""
+            except Exception as e:
+                res, err = None, str(e)
+            GLib.idle_add(self._update_result, res, err, quiet)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _update_result(self, res, err, quiet):
+        if err:
+            if not quiet:
+                self.toasts.add_toast(Adw.Toast(title="Could not check for updates"))
+            return False
+        self.cfg.data["last_update_check"] = time.time()
+        self.cfg.save()
+        if not res["available"]:
+            if not quiet:
+                self.toasts.add_toast(Adw.Toast(title="Wallforge is up to date"))
+            return False
+        if res["kind"] == "git":
+            t = Adw.Toast(title="A Wallforge update is available", button_label="Update", timeout=0)
+            t.connect("button-clicked", lambda _t: self._do_update())
+        else:
+            t = Adw.Toast(title="A Wallforge update is available. Update it with your package manager.", timeout=10)
+        self.toasts.add_toast(t)
+        return False
+
+    def _do_update(self):
+        def work():
+            try:
+                msg, err = updater.update(), ""
+            except Exception as e:
+                msg, err = "", str(e)
+            GLib.idle_add(lambda: (self.toasts.add_toast(Adw.Toast(
+                title=(f"Updated to {msg}. Restart Wallforge to use it." if not err else err[:100]), timeout=8)), False)[1])
+        threading.Thread(target=work, daemon=True).start()
 
     def _show_log(self, output):
         d = Adw.AlertDialog(heading=f"Engine log: {output}", body="Last lines of the engine output.")
@@ -745,6 +789,14 @@ class Window(Adw.ApplicationWindow):
                           "ignores those, run wallforge.sh --restore from its startup config.", active=autostart_enabled())
         r.connect("notify::active", lambda rr, _p: set_autostart(rr.get_active()))
         g3.add(r)
+        gu = Adw.PreferencesGroup(title="Updates")
+        pg.add(gu)
+        top_switch(gu, "Check for updates", "check_updates", "Once a day, asks GitHub whether a newer Wallforge exists.")
+        ru = Adw.ActionRow(title="Check now", subtitle=f"Version {__version__}, installed as: {updater.kind()}")
+        bu = Gtk.Button(label="Check", valign=Gtk.Align.CENTER)
+        bu.connect("clicked", lambda _b: self.check_update())
+        ru.add_suffix(bu)
+        gu.add(ru)
         n = Adw.ActionRow(title="Changes apply the next time a wallpaper starts")
         n.add_css_class("dim-label")
         g3.add(n)
@@ -811,7 +863,7 @@ def set_autostart(on: bool):
     if not on:
         AUTOSTART.unlink(missing_ok=True)
         return
-    launcher = Path(__file__).resolve().parent.parent / "wallforge.sh"
+    launcher = shutil.which("wallforge") or str(Path(__file__).resolve().parent.parent / "wallforge.sh")
     AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
     AUTOSTART.write_text(f"[Desktop Entry]\nType=Application\nName=Wallforge (restore wallpapers)\n"
                          f"Exec={launcher} --restore\nIcon=dev.wallforge.Wallforge\nNoDisplay=true\n"
