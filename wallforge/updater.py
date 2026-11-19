@@ -56,8 +56,9 @@ def _healthy() -> bool:
     r = subprocess.run([sys.executable, "-I", "-m", "compileall", "-q", str(ROOT / "wallforge")], capture_output=True, timeout=60)
     if r.returncode:
         return False
-    r = subprocess.run([sys.executable, "-I", "-c", "import wallforge.config, wallforge.paths, wallforge.updater"],
-                       cwd=ROOT, capture_output=True, timeout=60)
+    r = subprocess.run([sys.executable, "-I", "-c",
+                        "import sys; sys.path.insert(0, sys.argv[1]); import wallforge.config, wallforge.paths, wallforge.updater",
+                        str(ROOT)], capture_output=True, timeout=60)
     return r.returncode == 0
 
 
