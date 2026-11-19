@@ -1,0 +1,27 @@
+pkgbase = wallforge-git
+	pkgdesc = GTK4 front end for linux-wallpaperengine: library, settings, Workshop browser, per-monitor control
+	pkgver = r0.0000000
+	pkgrel = 1
+	url = https://github.com/pgm1207/wallforge
+	arch = any
+	license = MIT
+	makedepends = git
+	depends = python
+	depends = python-gobject
+	depends = gtk4
+	depends = libadwaita
+	depends = python-pillow
+	depends = python-aiohttp
+	depends = git
+	optdepends = linux-wallpaperengine-git: the wallpaper engine itself (or another linux-wallpaperengine package)
+	optdepends = steam: subscribe to Workshop wallpapers and fetch Wallpaper Engine assets
+	optdepends = ffmpeg: still frames for palette sync
+	optdepends = matugen: palette sync
+	optdepends = wallust: palette sync
+	optdepends = python-pywal: palette sync
+	provides = wallforge
+	conflicts = wallforge
+	source = git+https://github.com/pgm1207/wallforge.git
+	sha256sums = SKIP
+
+pkgname = wallforge-git

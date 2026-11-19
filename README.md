@@ -41,12 +41,22 @@ Workshop wallpapers themselves are downloaded by the Steam client when you subsc
 
 ## Install and run
 
+**Arch / CachyOS (AUR, once published):** `yay -S wallforge-git`
+
+**From source:**
+
 ```bash
 git clone https://github.com/pgm1207/wallforge
 cd wallforge
 ./install.sh        # menu entry and icon (optional)
 ./wallforge.sh
 ```
+
+## Updates
+
+Wallforge checks GitHub once a day (switch it off in Settings > Updates). A git clone updates itself with an
+"Update" button in the notification (`git pull --ff-only`, restart afterwards). The AUR package only tells you
+and leaves the update to your package manager. The package lives in `packaging/aur/`.
 
 ## Disclaimer
 
