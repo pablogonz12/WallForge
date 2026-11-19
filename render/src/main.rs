@@ -170,6 +170,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
 }
 
 fn main() {
+    let t_proc = Instant::now();
     std::panic::set_hook(Box::new(|info| {
         let m = info.payload().downcast_ref::<&str>().map(|s| s.to_string())
             .or_else(|| info.payload().downcast_ref::<String>().cloned()).unwrap_or_else(|| "panic".into());
@@ -383,7 +384,7 @@ fn main() {
                 dirty = false;
                 if dbg && changed { let g = last_present.elapsed(); if g > period * 2 { eprintln!("wallforge-render: present gap {:.1} ms", g.as_secs_f64() * 1e3); } }
                 last_present = Instant::now();
-                if first { first = false; base_wall = Instant::now(); base_pts = ring.back().map(|f| f.pts).unwrap_or(0.0); next_slot = base_wall; }
+                if first { first = false; if dbg { eprintln!("wallforge-render: first frame {:.0} ms after start", t_proc.elapsed().as_secs_f64() * 1e3); } base_wall = Instant::now(); base_pts = ring.back().map(|f| f.pts).unwrap_or(0.0); next_slot = base_wall; }
             }
             // next wake: the cap grid, but no earlier than the next video frame is actually due
             next_slot += period;

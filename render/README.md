@@ -15,7 +15,7 @@ wallforge-render --output DP-2 --bg <wallpaper dir | video file> \
   `--software` forces software decode.
 - `--fps` caps presentation (default 30); extra video frames are dropped without upload/export.
 - Presentation is paced by `wl_surface.frame` callbacks: when the surface is hidden or the screen is off
-  no callback arrives, so decoding stops (wakes 4x/s only to check for signals). Playback resumes where it stopped.
+  no callback arrives, so decoding stops (no timers: the loop blocks in poll until a frame is due or a signal arrives). Playback resumes where it stopped.
 - Surface: all anchors, exclusive zone -1, empty input region (clicks pass through). Output resize handled.
 - SIGTERM/SIGINT exit cleanly.
 - Audio: ffmpeg decode -> libpulse-simple (PipeWire's pulse server), one extra thread, `--volume 0..100` (default 100), `--silent` off. Synced to the video clock with drift correction, loops with the video, paused with presentation. No audio stream = nothing started.
@@ -30,3 +30,14 @@ Needs ffmpeg dev libs (libav*), libEGL, libwayland-client, libva (runtime). No p
 Untagged video is assumed BT.709 when height >= 720.
 - Looping drains the decoder and seeks to 0 (tiny hitch possible on slow disks).
 - Only `NV12`/`P010`-style 2-layer VAAPI exports are imported.
+
+## Check mode
+`wallforge-render --check <dir|file>` prints one JSON line without opening a window:
+`ok, file, codec, profile, pix_fmt, bit_depth, width, height, fps, duration, audio{codec,channels,rate}, vaapi, vaapi_format, vaapi_error`.
+On failure: `{"ok":false,"error":..}` on stdout, message on stderr, exit 1.
+
+## Failure handling
+- Bad files fail fast (decoder opens before Wayland/EGL) with a one-line error, exit 1.
+- A watchdog exits 1 if one decoder call takes >6 s (corrupt streams can hang ffmpeg/VAAPI).
+- Panic hook exits 1, except in the audio thread, which only loses audio.
+- Env: `WALLFORGE_DEBUG` (timing logs), `WALLFORGE_FFMPEG_LOG` (ffmpeg logs).
