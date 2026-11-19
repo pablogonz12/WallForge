@@ -376,11 +376,18 @@ class Window(Adw.ApplicationWindow):
                 self.toasts.add_toast(Adw.Toast(title=f"Skipped {', '.join(skipped)}: ultrawide wallpaper on a 16:9 screen"))
                 if not outputs:
                     return
-        if not engine.use_native(self.cfg, it) and (not assets.have_assets(self.cfg.data["assets_dir"])
-                                                     or not paths.find_engine(self.cfg.data["engine_dir"])):
-            self._check_setup()
-            self.toasts.add_toast(Adw.Toast(title="Finish setup first (Settings > Setup)"))
-            return
+        if not engine.use_native(self.cfg, it):
+            if it.kind == "web":
+                self.toasts.add_toast(Adw.Toast(title="Web wallpapers are not supported yet"))
+                return
+            if it.kind != "video" and not assets.have_assets(self.cfg.data["assets_dir"]):
+                self._check_setup()
+                self.toasts.add_toast(Adw.Toast(title="Scene wallpapers need Wallpaper Engine's assets (Settings > Setup)"))
+                return
+            if not paths.find_render() and not paths.find_engine(self.cfg.data["engine_dir"]):
+                self._check_setup()
+                self.toasts.add_toast(Adw.Toast(title="Finish setup first (Settings > Setup)"))
+                return
         self.cfg.save()
 
         def work():
@@ -532,16 +539,13 @@ class Window(Adw.ApplicationWindow):
         return False
 
     def _check_setup(self):
-        """Videos need only the native renderer. The classic engine and the assets are asked for only when the
-        library holds wallpapers the native renderer cannot play yet (scenes, web)."""
+        """Videos need only the native renderer. Scenes also need Wallpaper Engine's assets (from your own copy).
+        The classic linux-wallpaperengine is never required."""
         miss = []
         if not paths.find_render() and not paths.find_engine(self.cfg.data["engine_dir"]):
             miss.append("the Wallforge renderer")
-        elif any(i.kind != "video" and not i.broken for i in self.items):
-            if not paths.find_engine(self.cfg.data["engine_dir"]):
-                miss.append("the linux-wallpaperengine program (needed for scene and web wallpapers for now)")
-            if not assets.have_assets(self.cfg.data["assets_dir"]):
-                miss.append("Wallpaper Engine's assets (needed for scene wallpapers)")
+        elif any(i.kind == "scene" and not i.broken for i in self.items) and not assets.have_assets(self.cfg.data["assets_dir"]):
+            miss.append("Wallpaper Engine's assets (needed for scene wallpapers)")
         self.banner.set_title("Setup needed: " + " and ".join(miss) + " missing." if miss else "")
         self.banner.set_revealed(bool(miss))
 

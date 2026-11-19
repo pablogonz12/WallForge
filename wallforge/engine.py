@@ -24,20 +24,40 @@ def _fmt(spec: dict, val) -> str:
 
 
 def use_native(cfg, item: library.Item) -> bool:
-    """Native renderer (beta) is on, installed, and the wallpaper is a plain video."""
-    return (cfg.data.get("renderer") == "native" and item.kind == "video" and not item.broken
-            and paths.find_render() is not None)
+    """Native renderer is on, installed, and the wallpaper is a video or a scene (scenes need the assets)."""
+    if cfg.data.get("renderer") != "native" or item.broken or paths.find_render() is None:
+        return False
+    if item.kind == "video":
+        return True
+    return item.kind == "scene" and paths.find_assets(cfg.data["assets_dir"]) is not None
 
 
-def build_native_args(cfg, item: library.Item, output: str) -> list[str]:
+def build_native_args(cfg, item: library.Item, output: str, overrides: dict | None = None) -> list[str]:
     e = cfg.data["engine"]
     scaling = e["scaling"] if e["scaling"] in ("fill", "fit", "stretch") else "fill"
-    a = [str(paths.find_render()), "--output", output, "--bg", str(item.run_dir), "--scaling", scaling,
+    props = item.properties()
+    vals = dict(item.defaults())
+    vals.update(cfg.values_for(item.id))
+    vals.update(overrides or {})
+    run = item.run_dir
+    if item.kind == "scene":
+        imgs = {k: v for k, v in vals.items() if (props.get(k) or {}).get("type") == "scenetexture"}
+        if imgs:
+            run = texpatch.patched_dir(item.run_dir, imgs)
+    a = [str(paths.find_render()), "--output", output, "--bg", str(run), "--scaling", scaling,
          "--fps", str(e["fps"]), "--layer", e.get("layer", "bottom")]
     if e.get("silent"):
         a.append("--silent")
     else:
         a += ["--volume", str(e["volume"])]
+    if item.kind == "scene":
+        a_dir = paths.find_assets(cfg.data["assets_dir"])
+        if a_dir:
+            a += ["--assets-dir", str(a_dir)]
+        for k, v in vals.items():
+            spec = props.get(k)
+            if isinstance(spec, dict) and v not in (None, "") and spec.get("type") != "scenetexture":
+                a += ["--set-property", f"{k}={_fmt(spec, v)}"]
     return a
 
 
@@ -140,7 +160,7 @@ def start(cfg, item: library.Item, output: str, overrides: dict | None = None, l
     STATE.mkdir(parents=True, exist_ok=True)
     native = use_native(cfg, item) and not legacy
     _marker(output).write_text("native" if native else "legacy")
-    args = build_native_args(cfg, item, output) if native else build_args(cfg, item, output, overrides)
+    args = build_native_args(cfg, item, output, overrides) if native else build_args(cfg, item, output, overrides)
     log = open(STATE / f"{output}.log", "w")
     eng_dir = Path(args[0]).parent
     p = subprocess.Popen(args, cwd=str(eng_dir), env=dict(os.environ) if native else _env(eng_dir), stdout=log, stderr=subprocess.STDOUT,
