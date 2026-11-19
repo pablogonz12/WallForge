@@ -245,6 +245,7 @@ class Window(Adw.ApplicationWindow):
             fc.item = it
             self.flow.append(fc)
         self._update_hidden()
+        self._check_setup()
         if toast:
             self.toasts.add_toast(Adw.Toast(title=f"{len(self.items)} wallpapers"))
 
@@ -531,15 +532,19 @@ class Window(Adw.ApplicationWindow):
         return False
 
     def _check_setup(self):
+        """Videos need only the native renderer. The classic engine and the assets are asked for only when the
+        library holds wallpapers the native renderer cannot play yet (scenes, web)."""
         miss = []
-        if not paths.find_engine(self.cfg.data["engine_dir"]):
-            miss.append("the linux-wallpaperengine program")
-        if not assets.have_assets(self.cfg.data["assets_dir"]):
-            miss.append("Wallpaper Engine's assets")
+        if not paths.find_render() and not paths.find_engine(self.cfg.data["engine_dir"]):
+            miss.append("the Wallforge renderer")
+        elif any(i.kind != "video" and not i.broken for i in self.items):
+            if not paths.find_engine(self.cfg.data["engine_dir"]):
+                miss.append("the linux-wallpaperengine program (needed for scene and web wallpapers for now)")
+            if not assets.have_assets(self.cfg.data["assets_dir"]):
+                miss.append("Wallpaper Engine's assets (needed for scene wallpapers)")
         self.banner.set_title("Setup needed: " + " and ".join(miss) + " missing." if miss else "")
         self.banner.set_revealed(bool(miss))
 
-    # ------------------------------------------------------------------ now playing
     def _build_playing_bar(self):
         self.play_box = Gtk.Box(spacing=16, margin_top=6, margin_bottom=6, margin_start=12, margin_end=12)
         return self.play_box
@@ -718,12 +723,13 @@ class Window(Adw.ApplicationWindow):
         c = self.cfg.data
 
         # --- setup
-        gs = Adw.PreferencesGroup(title="Setup", description="Wallforge needs the engine and Wallpaper Engine's assets. "
-                                  "You must own Wallpaper Engine on Steam, but you do not have to install it.")
+        gs = Adw.PreferencesGroup(title="Setup", description="Video wallpapers need nothing else. Scene and web wallpapers still need the classic engine and "
+                                  "Wallpaper Engine's assets until the native renderer covers them. You must own Wallpaper Engine on Steam, "
+                                  "but you do not have to install it.")
         pg.add(gs)
         eng = paths.find_engine(c["engine_dir"])
-        r_eng = Adw.ActionRow(title="Engine (linux-wallpaperengine)", subtitle=str(eng) if eng else
-                              "Not found. Install linux-wallpaperengine from your package manager or the AUR.")
+        r_eng = Adw.ActionRow(title="Classic engine (linux-wallpaperengine), for scenes", subtitle=str(eng) if eng else
+                              "Not found. Only needed for scene and web wallpapers. Install linux-wallpaperengine from your package manager or the AUR.")
         r_eng.add_prefix(Gtk.Image(icon_name="emblem-ok-symbolic" if eng else "dialog-warning-symbolic"))
         gs.add(r_eng)
         rn = paths.find_render()
