@@ -20,7 +20,39 @@ pub struct Tex {
     pub img_w: u32, pub img_h: u32, // logical image size
     pub flags: u32,
     pub payload: Payload,
-    pub frame: Option<(u32, u32)>, // sprite-sheet frame size (TEXS section)
+    pub frame: Option<(u32, u32)>, // sprite-sheet size of frame 0 (TEXS section)
+    pub frames: Vec<SpriteFrame>,
+}
+
+/// One sprite-sheet cell in pixels (origin top-left) and how long it is shown.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpriteFrame { pub x: f32, pub y: f32, pub w: f32, pub h: f32, pub dur: f32 }
+
+/// Parses the body of a TEXS section (after the magic): u32 count, u32 w, u32 h, then 32-byte records
+/// [u32 image, f32 time, f32 x, f32 y, f32 w, f32 wy, f32 hx, f32 h].
+pub fn parse_frames(b: &[u8]) -> Vec<SpriteFrame> {
+    let u = |o: usize| b.get(o..o + 4).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]));
+    let f = |o: usize| u(o).map(f32::from_bits);
+    let Some(n) = u(0) else { return vec![] };
+    if n == 0 || n > 4096 { return vec![]; }
+    let mut v = vec![];
+    for k in 0..n as usize {
+        let o = 12 + k * 32;
+        let (Some(dur), Some(x), Some(y), Some(w), Some(h)) = (f(o + 4), f(o + 8), f(o + 12), f(o + 16), f(o + 28)) else { return vec![] };
+        let (w, h) = (w.abs().max(f(o + 20).unwrap_or(0.0).abs()), h.abs().max(f(o + 24).unwrap_or(0.0).abs()));
+        if !(w >= 1.0 && h >= 1.0) { return vec![]; }
+        v.push(SpriteFrame { x, y, w, h, dur: if dur > 0.0 { dur } else { 0.1 } });
+    }
+    v
+}
+
+/// Frame index for time `t` (looping over the summed durations).
+pub fn frame_at(frames: &[SpriteFrame], t: f32) -> usize {
+    let total: f32 = frames.iter().map(|f| f.dur).sum();
+    if frames.len() < 2 || total <= 0.0 { return 0; }
+    let mut r = t.rem_euclid(total);
+    for (i, f) in frames.iter().enumerate() { if r < f.dur { return i; } r -= f.dur; }
+    frames.len() - 1
 }
 
 pub const FLAG_NO_INTERP: u32 = 1;
@@ -84,15 +116,11 @@ pub fn parse(b: &[u8], header_only: bool) -> Result<Tex, String> {
     if ver == 4 { mp4 = r.u32()? == 1; }
     let mut layout = ver.min(3);
     if ver == 4 && mp4 { layout = 4; }
-    let frame = b.windows(8).position(|w| w == b"TEXS0003" || w == b"TEXS0002" || w == b"TEXS0001").and_then(|i| {
-        let g = |o: usize| b.get(i + 9 + o..i + 13 + o).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]));
-        let f = |o: usize| b.get(i + 9 + o..i + 13 + o).map(|x| f32::from_le_bytes([x[0], x[1], x[2], x[3]]));
-        let (n, fw, fh) = (g(0)?, g(4)?, g(8)?);
-        let _ = f(0);
-        if n > 1 && fw > 0 && fh > 0 && fw <= tex_w && fh <= tex_h { Some((fw, fh)) } else { None }
-    });
+    let frames = b.windows(8).position(|w| w == b"TEXS0003" || w == b"TEXS0002" || w == b"TEXS0001").map(|i| parse_frames(&b[i + 9..])).unwrap_or_default();
+    let frames: Vec<SpriteFrame> = if frames.len() > 1 && frames.iter().all(|f| f.x >= 0.0 && f.y >= 0.0 && f.x + f.w <= tex_w as f32 + 0.5 && f.y + f.h <= tex_h as f32 + 0.5) { frames } else { vec![] };
+    let frame = frames.first().map(|f| (f.w as u32, f.h as u32));
     if std::env::var("WF_DBG").is_ok() { eprintln!("tex frame={:?} {}x{} img {}x{}", frame, tex_w, tex_h, img_w, img_h); }
-    let mk = |payload| Tex { tex_w, tex_h, img_w, img_h, flags, payload, frame };
+    let mk = |payload| Tex { tex_w, tex_h, img_w, img_h, flags, payload, frame, frames: frames.clone() };
     if header_only { return Ok(mk(Payload::Raw { fmt: fmt_of(format).unwrap_or(Fmt::Rgba8), mips: vec![] })); }
     // Only the first image matters for a still texture (more images = gif/sprite frames; frame 0 is used).
     let nmip = r.u32()?;
@@ -346,6 +374,23 @@ pub mod synth {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sprite_frames_parse_and_loop() {
+        let mut b = vec![];
+        for v in [2u32, 100, 50] { b.extend(v.to_le_bytes()); }
+        for (x, dur) in [(0.0f32, 0.5f32), (100.0, 0.25)] {
+            b.extend(0u32.to_le_bytes());
+            for f in [dur, x, 0.0, 100.0, 0.0, 0.0, 50.0] { b.extend(f.to_le_bytes()); }
+        }
+        let fr = parse_frames(&b);
+        assert_eq!(fr.len(), 2);
+        assert_eq!((fr[1].x, fr[1].w, fr[1].h), (100.0, 100.0, 50.0));
+        assert_eq!(frame_at(&fr, 0.0), 0);
+        assert_eq!(frame_at(&fr, 0.6), 1);
+        assert_eq!(frame_at(&fr, 0.8), 0); // loops after 0.75 s
+        assert!(parse_frames(&b[..20]).is_empty());
+    }
+
     use super::*;
     #[test]
     fn rgba_v1_and_v3_lz4() {

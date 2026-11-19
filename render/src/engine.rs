@@ -14,9 +14,9 @@ pub use crate::gfx::Scaling;
 enum Blend { Alpha, Additive }
 
 const VS: &str = "#version 300 es
-uniform mat4 mvp; uniform vec2 size; uniform float flip; uniform vec2 uvs; out vec2 uv;
+uniform mat4 mvp; uniform vec2 size; uniform float flip; uniform vec2 uvs; uniform vec2 uvo; out vec2 uv;
 void main(){ vec2 p = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));
- uv = vec2(p.x, flip > 0.5 ? p.y : 1.0 - p.y) * uvs; gl_Position = mvp * vec4((p - 0.5) * size, 0.0, 1.0); }";
+ uv = vec2(p.x, flip > 0.5 ? p.y : 1.0 - p.y) * uvs + uvo; gl_Position = mvp * vec4((p - 0.5) * size, 0.0, 1.0); }";
 const FS: &str = "#version 300 es
 precision highp float; in vec2 uv; out vec4 o; uniform sampler2D t; uniform vec4 tint;
 void main(){ vec4 c = texture(t, uv); o = vec4(c.rgb * tint.rgb, c.a * tint.a); }";
@@ -58,6 +58,7 @@ pub fn link(vs: &str, fs: &str) -> Result<u32, String> {
 }
 fn loc(p: u32, n: &str) -> i32 { let c = CString::new(n).unwrap(); unsafe { gl::GetUniformLocation(p, c.as_ptr()) } }
 
+#[derive(Clone, Copy)]
 struct Target { tex: u32, fbo: u32, w: i32, h: i32 }
 impl Target {
     fn new(w: i32, h: i32) -> Target {
@@ -76,6 +77,15 @@ impl Target {
     fn bytes(&self) -> usize { self.w as usize * self.h as usize * 4 }
 }
 
+impl Layer {
+    /// UV scale and offset of the sprite-sheet cell shown at time `t` (whole texture when not a sheet).
+    fn cell(&self, t: f32) -> ([f32; 2], [f32; 2]) {
+        if self.frames.len() < 2 { return (self.uvs, [0.0, 0.0]); }
+        let f = &self.frames[tex::frame_at(&self.frames, t)];
+        ([f.w / self.tex_wh.0, f.h / self.tex_wh.1], [f.x / self.tex_wh.0, f.y / self.tex_wh.1])
+    }
+}
+
 struct Pass {
     prog: u32,
     uniforms: Vec<(Uniform, i32)>,
@@ -88,11 +98,11 @@ struct Pass {
 
 struct Layer {
     name: String, tex: u32, size: [f32; 2], world: Mat4, color: [f32; 3], alpha: f32, blend: Blend,
-    uvs: [f32; 2], full: bool, passes: Vec<Pass>, ping: Option<(Target, Target)>, named: HashMap<String, Target>, px: (i32, i32),
+    uvs: [f32; 2], frames: Vec<tex::SpriteFrame>, tex_wh: (f32, f32), full: bool, passes: Vec<Pass>, ping: Option<(Target, Target)>, named: HashMap<String, Target>, px: (i32, i32),
 }
 
 pub struct Engine {
-    layers: Vec<Layer>, prog: u32, u_mvp: i32, u_size: i32, u_tint: i32, u_flip: i32, u_uvs: i32,
+    layers: Vec<Layer>, prog: u32, u_mvp: i32, u_size: i32, u_tint: i32, u_flip: i32, u_uvs: i32, u_uvo: i32,
     vao: u32, view: Mat4, pub clear: [f32; 3], scene_wh: (f32, f32),
     pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32,
     out: (i32, i32), scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
@@ -134,7 +144,7 @@ impl Engine {
             gl::EnableVertexAttribArray(1); gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, 20, 12 as *const _);
             gl::Disable(gl::DEPTH_TEST); gl::Disable(gl::DITHER); gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
         }
-        let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"),
+        let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
             vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
             out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None };
         e.rebuild();
@@ -164,6 +174,8 @@ impl Engine {
         self.view = v;
         let s3tc = tex::has_s3tc();
         let mut cache: HashMap<String, Option<GlTex>> = HashMap::new();
+        // Effect buffers are only live while one layer renders, so layers share them by (size, slot).
+        let mut pool: HashMap<(i32, i32, usize), Target> = HashMap::new();
         let n = self.scene.objects.len();
         for i in 0..n {
             let (name, model, size_o, scale, color, alpha, blend_o) = {
@@ -175,6 +187,7 @@ impl Engine {
             let solid = def.tex_path.is_none() && (def.material.shader.contains("solid") || def.material.shader.contains("flat"));
             let tp = match def.tex_path.clone() { Some(t) => t, None if solid => String::new(), None => { self.note(format!("layer '{name}': no texture, skipped")); continue } };
             let full = tp.ends_with("_rt_FullFrameBuffer.tex");
+            let mut frames: Vec<tex::SpriteFrame> = vec![]; let mut tex_wh = (1.0f32, 1.0f32);
             let (size, px, gt) = if solid {
                 let sz = size_o.or(def.size_hint).unwrap_or([self.scene_wh.0, self.scene_wh.1]);
                 let px = ((sz[0] * scale[0].abs() * sx).ceil().max(1.0) as i32, (sz[1] * scale[1].abs() * sy).ceil().max(1.0) as i32);
@@ -188,11 +201,14 @@ impl Engine {
             let size = size_o.or(def.size_hint).unwrap_or([t.img_w as f32, t.img_h as f32]);
             let px = ((size[0] * scale[0].abs() * sx).ceil().max(1.0) as i32, (size[1] * scale[1].abs() * sy).ceil().max(1.0) as i32);
             let gt = match tex::upload(&t, px.0 as u32, px.1 as u32, &meta, s3tc) { Ok(g) => g, Err(e) => { self.note(format!("layer '{name}': {e}, skipped")); continue } };
+            frames = t.frames.clone(); tex_wh = (t.tex_w as f32, t.tex_h as f32);
             (size, px, gt)
             };
+            if frames.len() > 1 { self.animated = true; }
             self.vram += gt.bytes;
+            if std::env::var("WF_DBG").is_ok() { eprintln!("vram: layer '{name}' tex {:.1} MiB ({}x{}) px {:?}", gt.bytes as f64 / 1048576.0, gt.w, gt.h, px); }
             let world = world_of(&self.scene.objects, i, 0);
-            let mut layer = Layer { name: name.clone(), tex: gt.id, size, world, color, alpha, uvs: gt.uv, full, blend: blend_of(blend_o.as_deref().unwrap_or(&def.material.blending)),
+            let mut layer = Layer { name: name.clone(), tex: gt.id, size, world, color, alpha, uvs: gt.uv, frames, tex_wh, full, blend: blend_of(blend_o.as_deref().unwrap_or(&def.material.blending)),
                 passes: vec![], ping: None, named: HashMap::new(), px };
             if def.material.blending == "additive" { layer.blend = Blend::Additive; }
             // effects
@@ -205,21 +221,26 @@ impl Engine {
                 let mut built = vec![];
                 let mut ok = true;
                 for (pi, ep) in ed.passes.iter().enumerate() {
-                    match self.build_pass(&ename, ep, ovs.get(pi), &mut cache, s3tc) { Ok(p) => built.push(p), Err(e) => { self.note(format!("layer '{name}': effect {file} pass {pi}: {e}; effect skipped")); ok = false; break; } }
+                    match self.build_pass(&ename, ep, ovs.get(pi), &mut cache, s3tc, (px.0 as u32, px.1 as u32)) { Ok(p) => built.push(p), Err(e) => { self.note(format!("layer '{name}': effect {file} pass {pi}: {e}; effect skipped")); ok = false; break; } }
                 }
                 if ok { layer.passes.extend(built); }
             }
             if !layer.passes.is_empty() {
                 let (w, h) = (px.0.clamp(1, 4096), px.1.clamp(1, 4096));
-                let (a, b) = (Target::new(w, h), Target::new(w, h));
-                self.vram += a.bytes() + b.bytes();
+                let (w, h) = (w, h);
+                let mut grab = |slot: usize, tw: i32, th: i32, vram: &mut usize| -> Target {
+                    *pool.entry((tw, th, slot)).or_insert_with(|| { let t = Target::new(tw, th); *vram += t.bytes(); t })
+                };
+                let (a, b) = (grab(0, w as i32, h as i32, &mut self.vram), grab(1, w as i32, h as i32, &mut self.vram));
                 layer.ping = Some((a, b));
                 for p in &layer.passes {
                     if let Some(t) = &p.target {
                         if !layer.named.contains_key(t) {
                             let d = fbo_div.get(t).copied().unwrap_or(1.0);
-                            let tg = Target::new(((w as f32 / d) as i32).max(1), ((h as f32 / d) as i32).max(1));
-                            self.vram += tg.bytes(); layer.named.insert(t.clone(), tg);
+                            let slot = 2 + layer.named.len();
+                            let tg = grab(slot, ((w as f32 / d) as i32).max(1), ((h as f32 / d) as i32).max(1), &mut self.vram);
+                            if std::env::var("WF_DBG").is_ok() { eprintln!("vram: fbo {t} {}x{}", tg.w, tg.h); }
+                            layer.named.insert(t.clone(), tg);
                         }
                     }
                     if p.time { self.animated = true; }
@@ -231,13 +252,13 @@ impl Engine {
             let rt = Target::new(self.out.0.max(1), self.out.1.max(1));
             self.vram += rt.bytes(); self.scene_rt = Some(rt);
         }
-        for (_, t) in cache { if let Some(t) = t { self.vram += t.bytes; } }
+        for (k, t) in cache { if let Some(t) = t { if std::env::var("WF_DBG").is_ok() { eprintln!("vram: cached {k} {:.1} MiB {}x{}", t.bytes as f64 / 1048576.0, t.w, t.h); } self.vram += t.bytes; } }
         eprintln!("wallforge-render: scene {}x{} -> {}x{}: {} layers, {} with effects, texture+fbo memory {:.1} MiB, animated={}",
             self.scene_wh.0, self.scene_wh.1, self.out.0, self.out.1, self.layers.len(), self.layers.iter().filter(|l| !l.passes.is_empty()).count(), self.vram as f64 / 1048576.0, self.animated);
     }
 
     fn build_pass(&mut self, ename: &str, ep: &scene::EffectPass, ov: Option<&(Map<String, Value>, Vec<Option<String>>, Map<String, Value>)>,
-                  cache: &mut HashMap<String, Option<GlTex>>, s3tc: bool) -> Result<Pass, String> {
+                  cache: &mut HashMap<String, Option<GlTex>>, s3tc: bool, want: (u32, u32)) -> Result<Pass, String> {
         let mat = scene::load_material(&self.vfs, &ep.material).ok_or_else(|| format!("material {} not found", ep.material))?;
         let mut combos = mat.combos.clone();
         if let Some((_, _, c)) = ov { for (k, v) in c { combos.insert(k.clone(), v.clone()); } }
@@ -296,7 +317,7 @@ impl Engine {
                 Some(n) if !n.starts_with("_rt_") => {
                     let path = scene::tex_file(n);
                     if !cache.contains_key(&path) {
-                        let r = self.vfs.read(&path).and_then(|b| tex::parse(&b, false).ok()).and_then(|t| tex::upload(&t, 4096, 4096, &TexMeta::default(), s3tc).ok());
+                        let r = self.vfs.read(&path).and_then(|b| tex::parse(&b, false).ok()).and_then(|t| tex::upload(&t, want.0, want.1, &TexMeta::default(), s3tc).ok());
                         cache.insert(path.clone(), r);
                     }
                     match cache.get(&path).and_then(|x| x.as_ref()) { Some(g) => textures.push(Some((g.id, (g.w, g.h)))), None => return Err(format!("texture {path} not found")) }
@@ -371,7 +392,7 @@ impl Engine {
                 gl::Uniform2f(self.u_size, lsize[0], lsize[1]);
                 gl::Uniform4f(self.u_tint, l.color[0], l.color[1], l.color[2], l.alpha);
                 gl::Uniform1f(self.u_flip, 0.0);
-                if l.ping.is_some() { gl::Uniform2f(self.u_uvs, 1.0, 1.0); } else { gl::Uniform2f(self.u_uvs, l.uvs[0], l.uvs[1]); }
+                if l.ping.is_some() { gl::Uniform2f(self.u_uvs, 1.0, 1.0); gl::Uniform2f(self.u_uvo, 0.0, 0.0); } else { let (uv, uo) = l.cell(t); gl::Uniform2f(self.u_uvs, uv[0], uv[1]); gl::Uniform2f(self.u_uvo, uo[0], uo[1]); }
                 gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, src_tex);
                 gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
                 gl::Disable(gl::BLEND);
@@ -386,7 +407,7 @@ impl Engine {
                 gl::UniformMatrix4fv(self.u_mvp, 1, gl::FALSE, scene::ident().as_ptr());
                 gl::Uniform2f(self.u_size, 2.0, 2.0);
                 gl::Uniform4f(self.u_tint, 1.0, 1.0, 1.0, 1.0);
-                gl::Uniform1f(self.u_flip, 1.0); gl::Uniform2f(self.u_uvs, 1.0, 1.0);
+                gl::Uniform1f(self.u_flip, 1.0); gl::Uniform2f(self.u_uvs, 1.0, 1.0); gl::Uniform2f(self.u_uvo, 0.0, 0.0);
                 gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, rt.tex);
                 gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
             }
@@ -406,7 +427,7 @@ impl Engine {
             gl::UniformMatrix4fv(self.u_mvp, 1, gl::FALSE, scene::ident().as_ptr());
             gl::Uniform2f(self.u_size, 2.0, 2.0);
             gl::Uniform4f(self.u_tint, 1.0, 1.0, 1.0, 1.0);
-            gl::Uniform1f(self.u_flip, if src.is_some() { 0.0 } else { 1.0 }); gl::Uniform2f(self.u_uvs, l.uvs[0], l.uvs[1]);
+            gl::Uniform1f(self.u_flip, if src.is_some() { 0.0 } else { 1.0 }); { let (uv, uo) = l.cell(t); gl::Uniform2f(self.u_uvs, uv[0], uv[1]); gl::Uniform2f(self.u_uvo, uo[0], uo[1]); }
             gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, src.unwrap_or(l.tex));
             gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
         }
