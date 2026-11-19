@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Wallforge
+Comment=Wallpaper Engine wallpapers on Linux: browse, tweak and download
+Exec=@EXEC@
+Icon=dev.wallforge.Wallforge
+Categories=Settings;GTK;
+Keywords=wallpaper;engine;animated;steam;workshop;
+StartupWMClass=dev.wallforge.Wallforge
