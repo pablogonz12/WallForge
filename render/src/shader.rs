@@ -144,6 +144,16 @@ pub fn undefined_in_conditions(src: &str) -> Vec<String> {
 /// shaders that fail to compile: integer literals outside integer-looking contexts become float literals.
 pub fn floatify_src(src: &str) -> String {
     let mut out = String::with_capacity(src.len() + 64);
+    // `const int N = ..;` constants used in float arithmetic (`N - 1.0`) are wrapped in float(..)
+    let mut int_consts: Vec<String> = vec![];
+    for l in src.lines() {
+        if let Some(r) = l.trim_start().strip_prefix("const int ") { if let Some(n) = r.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).next() { if !n.is_empty() { int_consts.push(n.to_string()); } } }
+    }
+    for l in src.lines() {
+        if let Some(r) = l.trim_start().strip_prefix("for") { if let Some(r) = r.trim_start().strip_prefix('(').map(|r| r.trim_start()).and_then(|r| r.strip_prefix("int ")) {
+            if let Some(n) = r.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).next() { if !n.is_empty() { int_consts.push(n.to_string()); } }
+        } }
+    }
     for line in src.lines() {
         let t = line.trim_start();
         let intish = t.starts_with('#') || line.contains("int ") || line.contains("ivec") || line.contains("uint") || line.contains("switch") || line.contains("case ");
@@ -157,7 +167,12 @@ pub fn floatify_src(src: &str) -> String {
             if i >= code_end { out.push(c as char); i += 1; continue; }
             if c == b'[' { bracket += 1; } else if c == b']' { bracket -= 1; }
             if c.is_ascii_alphabetic() || c == b'_' {
-                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') { out.push(b[i] as char); i += 1; }
+                let st = i;
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') { i += 1; }
+                let id = &line[st..i];
+                let after = line[i..].trim_start();
+                let prev_dot = st > 0 && b[st - 1] == b'.';
+                if bracket == 0 && !prev_dot && !t.starts_with("for") && !line.contains("for (") && !after.starts_with("++") && !after.starts_with("--") && !after.starts_with("+=") && !after.starts_with("=") && !after.starts_with("<") && !after.starts_with(">") && int_consts.iter().any(|n| n == id) { out.push_str(&format!("float({id})")); } else { out.push_str(id); }
             } else if c.is_ascii_digit() {
                 let st = i;
                 while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'.') { i += 1; }
@@ -213,6 +228,7 @@ mod tests {
         let mut over = Map::new(); over.insert("MODE".into(), serde_json::json!(0));
         assert!(translate(&fs, "effects/test", &over, &[], false).unwrap().frag.contains("#define MODE 0"));
         assert_eq!(undefined_in_conditions("#define A 1\n#if A == 1 && defined(B) && MASK\n#endif\n#elif SPEC > 2\n"), vec!["MASK", "SPEC"]);
+        assert_eq!(floatify_src("const int N = 3;\n\tconst float d = N - 1.0;\n"), "const int N = 3;\n\tconst float d = float(N) - 1.0;\n");
         assert_eq!(floatify_src("float b = 2 * x + v[1] - smoothstep(0, 1.5, y);\nint k = 3;\n"), "float b = 2.0 * x + v[1] - smoothstep(0.0, 1.5, y);\nint k = 3;\n");
         assert!(translate(&fs, "effects/none", &Map::new(), &[], false).is_err());
     }

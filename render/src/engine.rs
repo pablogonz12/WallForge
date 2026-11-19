@@ -237,8 +237,8 @@ impl Engine {
             Err(e1) => {
                 let vfs = &self.vfs;
                 match shader::translate(&|n| vfs.read_str(n), &mat.shader, &combos, &present, true) {
-                    Ok(t2) => match link(&t2.vert, &t2.frag) { Ok(p) => Ok((p, Some(t2))), Err(e2) => Err((e2, Some(t2))) },
-                    Err(_) => Err((e1, None)),
+                    Ok(t2) => { if std::env::var("WF_DBG").is_ok() { eprintln!("retry frag has float(: {}", t2.frag.contains("float(sampleCount)")); } match link(&t2.vert, &t2.frag) { Ok(p) => Ok((p, Some(t2))), Err(e2) => Err((e2, Some(t2))) } },
+                    Err(e) => { eprintln!("wallforge-render: floatify retry translate failed: {e}"); Err((e1, None)) }
                 }
             }
         };
