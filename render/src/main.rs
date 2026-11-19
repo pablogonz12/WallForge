@@ -1,7 +1,14 @@
 mod audio;
 mod check;
 mod egl;
+mod engine;
 mod gfx;
+mod pkg;
+mod scene;
+mod scene_run;
+mod shader;
+mod tex;
+mod testgen;
 mod video;
 
 use egl::*;
@@ -54,17 +61,20 @@ struct Args {
     volume: u32,
     silent: bool,
     check: bool,
+    assets_dir: Option<PathBuf>,
+    props: Vec<(String, String)>,
+    make_test: Option<PathBuf>,
 }
 
 fn usage() -> ! {
     eprintln!("usage: wallforge-render --output NAME --bg <dir|video> [--scaling fill|fit|stretch] [--fps N] \
-               [--layer background|bottom|top|overlay] [--silent] [--volume N] [--duration SECS] [--software]\n       wallforge-render --check <dir|video>   (probe, print one JSON line, no window)");
+               [--layer background|bottom|top|overlay] [--silent] [--volume N] [--duration SECS] [--software] [--assets-dir DIR] [--set-property key=value]...\n       wallforge-render --check <dir|video>   (probe, print one JSON line, no window)");
     std::process::exit(2)
 }
 
 fn parse_args() -> Args {
     let mut a = Args { output: String::new(), bg: PathBuf::new(), scaling: Scaling::Fill, fps: 30.0,
-        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false, check: false };
+        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false, check: false, assets_dir: None, props: vec![], make_test: None };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| usage());
@@ -80,11 +90,14 @@ fn parse_args() -> Args {
             "--volume" => a.volume = val().parse::<u32>().unwrap_or_else(|_| usage()).min(100),
             "--silent" => a.silent = true,
             "--software" => a.force_sw = true,
+            "--assets-dir" => a.assets_dir = Some(PathBuf::from(val())),
+            "--set-property" => { let v = val(); match v.split_once('=') { Some((k, x)) => a.props.push((k.to_string(), x.to_string())), None => usage() } }
+            "--make-test-scene" => { a.make_test = Some(PathBuf::from(val())); }
             "--check" => { a.check = true; a.bg = PathBuf::from(val()); }
             _ => usage(),
         }
     }
-    if a.check { return a; }
+    if a.check || a.make_test.is_some() { return a; }
     if a.output.is_empty() || a.bg.as_os_str().is_empty() || a.fps <= 0.0 { usage() }
     a
 }
@@ -185,6 +198,16 @@ fn main() {
         }
     }));
     let args = parse_args();
+    if let Some(d) = &args.make_test {
+        testgen::make(d).unwrap_or_else(|e| fatal(&e));
+        println!("{}", d.display());
+        return;
+    }
+    if scene_run::is_scene(&args.bg) {
+        if args.check { scene_run::check(&args); }
+        scene_run::run(args);
+        return;
+    }
     let video_path = resolve_video(&args.bg).unwrap_or_else(|e| {
         if args.check { println!("{}", serde_json::json!({"ok": false, "error": e})); }
         fatal(&e)
