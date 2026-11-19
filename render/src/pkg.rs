@@ -75,7 +75,7 @@ pub fn detect_assets_dir() -> Option<PathBuf> {
 
 impl Vfs {
     pub fn open(dir: &Path, assets: Option<PathBuf>) -> Result<Vfs, String> {
-        let pkg = match std::fs::read(dir.join("scene.pkg")) {
+        let pkg = match std::fs::read(dir.join("scene.pkg")).or_else(|_| std::fs::read(dir.join("gifscene.pkg"))) {
             Ok(d) => Some(Pkg::parse(d)?),
             Err(_) => None,
         };
