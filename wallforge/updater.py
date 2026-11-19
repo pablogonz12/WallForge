@@ -5,6 +5,7 @@ Git checkout: `git pull --ff-only`. Package install (AUR etc.): only tell the us
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 REPO = "https://github.com/pgm1207/wallforge"
@@ -50,11 +51,31 @@ def check() -> dict:
     return {"available": bool(cur) and cur != latest, "kind": kind(), "current": cur, "latest": latest}
 
 
+def _healthy() -> bool:
+    """The freshly pulled code must at least compile and import its non-GUI modules."""
+    r = subprocess.run([sys.executable, "-I", "-m", "compileall", "-q", str(ROOT / "wallforge")], capture_output=True, timeout=60)
+    if r.returncode:
+        return False
+    r = subprocess.run([sys.executable, "-I", "-c", "import wallforge.config, wallforge.paths, wallforge.updater"],
+                       cwd=ROOT, capture_output=True, timeout=60)
+    return r.returncode == 0
+
+
 def update() -> str:
-    """Pull the new version (git checkouts only). Returns a short summary line."""
+    """Pull the new version (git checkouts only), roll back if it does not load. Returns a short summary line."""
     if kind() != "git":
         raise RuntimeError("Not a git checkout: update it with your package manager")
     if _git("status", "--porcelain", "--untracked-files=no"):
         raise RuntimeError("Local changes in the Wallforge folder; not touching them")
+    old = _git("rev-parse", "HEAD")
     _git("pull", "--ff-only", timeout=120)
+    if not _healthy():
+        _git("reset", "--hard", old)
+        raise RuntimeError("The new version did not load, kept the old one")
     return _git("log", "-1", "--format=%h %s")
+
+
+def restart() -> None:
+    """Replace this process with a fresh Wallforge (same arguments)."""
+    import os
+    os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]])

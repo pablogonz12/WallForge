@@ -20,6 +20,7 @@ DEFAULTS = {
     "safe_content": True,  # Discover hides Mature/Questionable
     "autostart": False,
     "check_updates": True,
+    "auto_update": True,
     "last_update_check": 0,
     "window": {"w": 1280, "h": 800},
     "engine": {

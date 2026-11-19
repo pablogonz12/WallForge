@@ -130,8 +130,10 @@ class Window(Adw.ApplicationWindow):
         self.reload_library()
         self._check_setup()
         self.refresh_playing()
-        if self.cfg.data["check_updates"] and time.time() - self.cfg.data["last_update_check"] > 86400:
-            GLib.timeout_add_seconds(5, lambda: (self.check_update(quiet=True), False)[1])
+        if self.cfg.data["check_updates"]:
+            if time.time() - self.cfg.data["last_update_check"] > 6 * 3600:
+                GLib.timeout_add_seconds(5, lambda: (self.check_update(quiet=True), False)[1])
+            GLib.timeout_add_seconds(6 * 3600, self._periodic_update)
         GLib.timeout_add_seconds(4, self._watch)
         GLib.timeout_add_seconds(3, self._poll_playing)
 
@@ -413,6 +415,11 @@ class Window(Adw.ApplicationWindow):
         self.refresh_playing()
         return False
 
+    def _periodic_update(self):
+        if self.cfg.data["check_updates"]:
+            self.check_update(quiet=True)
+        return True
+
     def check_update(self, quiet=False):
         def work():
             try:
@@ -434,6 +441,9 @@ class Window(Adw.ApplicationWindow):
             if not quiet:
                 self.toasts.add_toast(Adw.Toast(title="Wallforge is up to date"))
             return False
+        if res["kind"] == "git" and self.cfg.data["auto_update"]:
+            self._do_update(auto=True)
+            return False
         if res["kind"] == "git":
             t = Adw.Toast(title="A Wallforge update is available", button_label="Update", timeout=0)
             t.connect("button-clicked", lambda _t: self._do_update())
@@ -442,15 +452,29 @@ class Window(Adw.ApplicationWindow):
         self.toasts.add_toast(t)
         return False
 
-    def _do_update(self):
+    def _do_update(self, auto=False):
+        if getattr(self, "_updating", False):
+            return
+        self._updating = True
+
         def work():
             try:
                 msg, err = updater.update(), ""
             except Exception as e:
                 msg, err = "", str(e)
-            GLib.idle_add(lambda: (self.toasts.add_toast(Adw.Toast(
-                title=(f"Updated to {msg}. Restart Wallforge to use it." if not err else err[:100]), timeout=8)), False)[1])
+            GLib.idle_add(self._update_done, msg, err, auto)
         threading.Thread(target=work, daemon=True).start()
+
+    def _update_done(self, msg, err, auto):
+        self._updating = False
+        if err:
+            if not auto or "did not load" in err:
+                self.toasts.add_toast(Adw.Toast(title=err[:100], timeout=8))
+            return False
+        t = Adw.Toast(title=f"Wallforge updated ({msg[:50]})", button_label="Restart now", timeout=0)
+        t.connect("button-clicked", lambda _t: updater.restart())
+        self.toasts.add_toast(t)
+        return False
 
     def _show_log(self, output):
         d = Adw.AlertDialog(heading=f"Engine log: {output}", body="Last lines of the engine output.")
@@ -791,7 +815,9 @@ class Window(Adw.ApplicationWindow):
         g3.add(r)
         gu = Adw.PreferencesGroup(title="Updates")
         pg.add(gu)
-        top_switch(gu, "Check for updates", "check_updates", "Once a day, asks GitHub whether a newer Wallforge exists.")
+        top_switch(gu, "Check for updates", "check_updates", "At start and every few hours, asks GitHub whether a newer Wallforge exists.")
+        top_switch(gu, "Install updates automatically", "auto_update", "Git installs only: downloads the new version in the background, "
+                   "checks it loads, and asks you to restart. Package installs update through your package manager.")
         ru = Adw.ActionRow(title="Check now", subtitle=f"Version {__version__}, installed as: {updater.kind()}")
         bu = Gtk.Button(label="Check", valign=Gtk.Align.CENTER)
         bu.connect("clicked", lambda _b: self.check_update())
