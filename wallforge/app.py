@@ -134,6 +134,7 @@ class Window(Adw.ApplicationWindow):
             if time.time() - self.cfg.data["last_update_check"] > 6 * 3600:
                 GLib.timeout_add_seconds(5, lambda: (self.check_update(quiet=True), False)[1])
             GLib.timeout_add_seconds(6 * 3600, self._periodic_update)
+        threading.Thread(target=updater.ensure_render, daemon=True).start()
         GLib.timeout_add_seconds(4, self._watch)
         GLib.timeout_add_seconds(3, self._poll_playing)
 
@@ -711,8 +712,8 @@ class Window(Adw.ApplicationWindow):
         r_eng.add_prefix(Gtk.Image(icon_name="emblem-ok-symbolic" if eng else "dialog-warning-symbolic"))
         gs.add(r_eng)
         rn = paths.find_render()
-        r_nat = Adw.SwitchRow(title="Native renderer (beta)", active=c.get("renderer") == "native",
-                              subtitle="Plays video wallpapers with Wallforge's own Rust renderer (hardware decode, no extra "
+        r_nat = Adw.SwitchRow(title="Native renderer (beta)", active=c.get("renderer", "native") == "native",
+                              subtitle="On by default. Plays video wallpapers with Wallforge's own Rust renderer (hardware decode, no extra "
                               "engine needed). Scene wallpapers still use linux-wallpaperengine." +
                               (f" Found: {rn}" if rn else " Not built yet."))
         r_nat.set_sensitive(bool(rn))

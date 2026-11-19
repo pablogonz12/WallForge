@@ -95,3 +95,18 @@ def restart() -> None:
     """Replace this process with a fresh Wallforge (same arguments)."""
     import os
     os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]])
+
+
+def ensure_render() -> bool:
+    """Git checkout without a built renderer: build it once in the background (needs cargo). True if now available."""
+    import shutil
+    crate = ROOT / "render"
+    if (crate / "target/release/wallforge-render").is_file():
+        return True
+    if not (crate / "Cargo.toml").is_file() or not shutil.which("cargo"):
+        return False
+    try:
+        r = subprocess.run(["cargo", "build", "--release", "-q"], cwd=str(crate), capture_output=True, timeout=1200)
+        return r.returncode == 0
+    except Exception:
+        return False
