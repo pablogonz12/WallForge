@@ -406,6 +406,7 @@ dependencies = [
  "wayland-backend",
  "wayland-client",
  "wayland-egl",
+ "wayland-protocols",
  "wayland-protocols-wlr",
 ]
 

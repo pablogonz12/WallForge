@@ -1,3 +1,4 @@
+mod audio;
 mod egl;
 mod gfx;
 mod video;
@@ -12,6 +13,8 @@ use std::time::{Duration, Instant};
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{wl_callback, wl_compositor, wl_output, wl_region, wl_registry, wl_surface};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+use wayland_protocols::wp::fractional_scale::v1::client::{wp_fractional_scale_manager_v1, wp_fractional_scale_v1};
+use wayland_protocols::wp::viewporter::client::{wp_viewport, wp_viewporter};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 static STOP: AtomicBool = AtomicBool::new(false);
@@ -25,6 +28,8 @@ struct Args {
     layer: zwlr_layer_shell_v1::Layer,
     duration: Option<f64>,
     force_sw: bool,
+    volume: u32,
+    silent: bool,
 }
 
 fn usage() -> ! {
@@ -35,7 +40,7 @@ fn usage() -> ! {
 
 fn parse_args() -> Args {
     let mut a = Args { output: String::new(), bg: PathBuf::new(), scaling: Scaling::Fill, fps: 30.0,
-        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false };
+        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| usage());
@@ -48,8 +53,8 @@ fn parse_args() -> Args {
                 "background" => zwlr_layer_shell_v1::Layer::Background, "bottom" => zwlr_layer_shell_v1::Layer::Bottom,
                 "top" => zwlr_layer_shell_v1::Layer::Top, "overlay" => zwlr_layer_shell_v1::Layer::Overlay, _ => usage() },
             "--duration" => a.duration = Some(val().parse().unwrap_or_else(|_| usage())),
-            "--volume" => { val(); }
-            "--silent" => {}
+            "--volume" => a.volume = val().parse::<u32>().unwrap_or_else(|_| usage()).min(100),
+            "--silent" => a.silent = true,
             "--software" => a.force_sw = true,
             _ => usage(),
         }
@@ -76,10 +81,25 @@ struct App {
     size: (i32, i32),
     resized: bool,
     cb_ready: bool,
+    frac: u32, // preferred fractional scale in 1/120 (0 = unknown)
 }
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for App {
     fn event(_: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
+}
+impl Dispatch<wp_viewporter::WpViewporter, ()> for App {
+    fn event(_: &mut Self, _: &wp_viewporter::WpViewporter, _: wp_viewporter::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+impl Dispatch<wp_viewport::WpViewport, ()> for App {
+    fn event(_: &mut Self, _: &wp_viewport::WpViewport, _: wp_viewport::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+impl Dispatch<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1, ()> for App {
+    fn event(_: &mut Self, _: &wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1, _: wp_fractional_scale_manager_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+impl Dispatch<wp_fractional_scale_v1::WpFractionalScaleV1, ()> for App {
+    fn event(s: &mut Self, _: &wp_fractional_scale_v1::WpFractionalScaleV1, e: wp_fractional_scale_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = e { if scale != s.frac { s.frac = scale; s.resized = true; } }
+    }
 }
 impl Dispatch<wl_compositor::WlCompositor, ()> for App {
     fn event(_: &mut Self, _: &wl_compositor::WlCompositor, _: wl_compositor::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
@@ -136,7 +156,7 @@ fn main() {
     let conn = Connection::connect_to_env().unwrap_or_else(|e| { eprintln!("wayland connect: {e}"); std::process::exit(1) });
     let (globals, mut queue) = registry_queue_init::<App>(&conn).expect("registry");
     let qh = queue.handle();
-    let mut app = App { outputs: vec![], configured: false, closed: false, size: (0, 0), resized: false, cb_ready: true };
+    let mut app = App { outputs: vec![], configured: false, closed: false, size: (0, 0), resized: false, cb_ready: true, frac: 0 };
     let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=6, ()).expect("wl_compositor");
     let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = globals.bind(&qh, 1..=4, ()).expect("zwlr_layer_shell_v1 (compositor lacks layer-shell)");
     let outs: Vec<(u32, u32)> = globals.contents().with_list(|l| l.iter().filter(|g| g.interface == "wl_output").map(|g| (g.name, g.version)).collect());
@@ -161,7 +181,11 @@ fn main() {
     layer.set_exclusive_zone(-1);
     layer.set_size(0, 0);
     layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
-    if scale > 1 { surface.set_buffer_scale(scale); }
+    let vpr: Option<wp_viewporter::WpViewporter> = globals.bind(&qh, 1..=1, ()).ok();
+    let fsm: Option<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
+    let viewport = vpr.as_ref().map(|v| v.get_viewport(&surface, &qh, ()));
+    let _fs = match (&fsm, &viewport) { (Some(m), Some(_)) => Some(m.get_fractional_scale(&surface, &qh, ())), _ => None };
+    if _fs.is_none() && scale > 1 { surface.set_buffer_scale(scale); }
     surface.commit();
     while !app.configured && !app.closed {
         queue.blocking_dispatch(&mut app).unwrap();
@@ -169,7 +193,17 @@ fn main() {
     if app.closed { eprintln!("layer surface closed"); return; }
 
     // ---- EGL ----
-    let (mut bw, mut bh) = (app.size.0 * scale, app.size.1 * scale);
+    if _fs.is_some() { let _ = queue.roundtrip(&mut app); }
+    app.resized = false;
+    eprintln!("wallforge-render: fractional-scale={} viewporter={} preferred={}", fsm.is_some(), vpr.is_some(), app.frac as f64 / 120.0);
+    // buffer size in physical pixels: fractional scale (wp-viewporter) or integer output scale
+    let phys = |logical: (i32, i32), frac: u32| -> (i32, i32) {
+        if _fs.is_some() && frac > 0 {
+            (((logical.0 as i64 * frac as i64 + 60) / 120) as i32, ((logical.1 as i64 * frac as i64 + 60) / 120) as i32)
+        } else { (logical.0 * scale, logical.1 * scale) }
+    };
+    let (mut bw, mut bh) = phys(app.size, app.frac);
+    if let Some(v) = &viewport { if _fs.is_some() && app.frac > 0 { v.set_destination(app.size.0, app.size.1); } }
     let wl_display = conn.backend().display_ptr() as *mut c_void;
     let (dpy, ctx, esurf, win);
     unsafe {
@@ -191,10 +225,15 @@ fn main() {
         eglSwapInterval(dpy, 0);
     }
     let mut gfx = Gfx::new(dpy, args.scaling);
-    let mut dec = video::Decoder::open(&video_path, !args.force_sw).unwrap_or_else(|e| { eprintln!("wallforge-render: {e}"); std::process::exit(1) });
+    let mut dec = video::Decoder::open(&video_path, !args.force_sw, args.fps).unwrap_or_else(|e| { eprintln!("wallforge-render: {e}"); std::process::exit(1) });
     eprintln!("wallforge-render: {}x{} @{:.2}fps decode={} dmabuf={} -> {}x{} @{} cap",
         dec.width, dec.height, dec.fps, if dec.hw { "vaapi" } else { "software" }, gfx.can_dmabuf, bw, bh, args.fps);
 
+    let audio = if args.silent { None } else { audio::Audio::start(&video_path, args.volume) };
+    if audio.is_some() { eprintln!("wallforge-render: audio on (volume {})", args.volume); }
+    let mut a_paused = true;
+    let test_pause = std::env::var_os("WALLFORGE_TEST_PAUSE").is_some();
+    let mut held_cb = false;
     let period = Duration::from_secs_f64(1.0 / args.fps);
     let start = Instant::now();
     let (mut base_wall, mut base_pts, mut last_render) = (Instant::now(), 0.0f64, Instant::now());
@@ -207,11 +246,20 @@ fn main() {
 
     while !STOP.load(Ordering::SeqCst) && !app.closed {
         if let Some(d) = args.duration { if start.elapsed().as_secs_f64() >= d { break; } }
-        let _ = queue.dispatch_pending(&mut app);
+        if let Err(e) = queue.dispatch_pending(&mut app) { eprintln!("wallforge-render: wayland error ({e}); exiting"); break; }
+        if test_pause {
+            // test hook: pretend the compositor sends no frame callbacks between 3 s and 7 s
+            let t = start.elapsed().as_secs_f64();
+            if t >= 3.0 && t < 7.0 { if app.cb_ready { app.cb_ready = false; held_cb = true; } }
+            else if held_cb { app.cb_ready = true; held_cb = false; }
+        }
         if app.resized {
             app.resized = false;
-            bw = app.size.0 * scale; bh = app.size.1 * scale;
+            let (nw, nh) = phys(app.size, app.frac);
+            bw = nw; bh = nh;
+            if let Some(v) = &viewport { if _fs.is_some() && app.frac > 0 { v.set_destination(app.size.0, app.size.1); } }
             win.resize(bw, bh, 0, 0);
+            eprintln!("wallforge-render: surface {}x{} logical -> {}x{} physical (scale {})", app.size.0, app.size.1, bw, bh, if app.frac > 0 { app.frac as f64 / 120.0 } else { scale as f64 });
             dirty = true;
         }
         let now = Instant::now();
@@ -227,7 +275,7 @@ fn main() {
                 no_frame_polls += 1;
                 if no_frame_polls > 3 {
                     eprintln!("wallforge-render: VAAPI produced no frames, falling back to software");
-                    dec = video::Decoder::open(&video_path, false).expect("sw reopen");
+                    dec = video::Decoder::open(&video_path, false, args.fps).expect("sw reopen");
                     base_wall = Instant::now(); base_pts = 0.0;
                 }
             }
@@ -235,13 +283,15 @@ fn main() {
             if let Some(mut f) = newf.take() {
                 if let Err(e) = gfx.upload(&f) {
                     eprintln!("wallforge-render: hardware import failed ({e}); falling back to software decode");
-                    dec = video::Decoder::open(&video_path, false).expect("sw reopen");
+                    dec = video::Decoder::open(&video_path, false, args.fps).expect("sw reopen");
                     base_wall = Instant::now(); base_pts = 0.0; ring.clear();
                     f = dec.advance(0.0).expect("sw first frame");
                     gfx.upload(&f).expect("sw upload");
                 }
+                let f_pos = f.pos;
                 ring.push_back(f);
-                while ring.len() > 4 { ring.pop_front(); }
+                while ring.len() > 1 { ring.pop_front(); }
+                if let Some(a) = &audio { a.set_video_pos(f_pos); }
                 changed = true; shown += 1;
             }
             if changed || dirty {
@@ -254,7 +304,12 @@ fn main() {
             next_due += period;
             if next_due < now { next_due = now; }
         }
-        let _ = conn.flush();
+        if let Some(a) = &audio {
+            let want = !first && !app.cb_ready && last_render.elapsed() > Duration::from_millis(400);
+            let want = want || first;
+            if want != a_paused { a_paused = want; a.set_paused(want); }
+        }
+        if let Err(e) = conn.flush() { eprintln!("wallforge-render: lost connection to the compositor ({e}); exiting"); break; }
         if let Some(guard) = queue.prepare_read() {
             let mut fds = [libc::pollfd { fd: std::os::fd::AsRawFd::as_raw_fd(&guard.connection_fd()), events: libc::POLLIN, revents: 0 }];
             let timeout_ms: i32 = if app.cb_ready {
@@ -262,9 +317,16 @@ fn main() {
                 (d.as_millis() as i32).min(250).max(0) + if d.subsec_micros() % 1000 > 0 { 1 } else { 0 }
             } else { 250 }; // paused (no frame callback): sleep, wake only to check signals
             let r = unsafe { libc::poll(fds.as_mut_ptr(), 1, timeout_ms) };
-            if r > 0 { let _ = guard.read(); } else { drop(guard); }
+            if r > 0 {
+                if let Err(e) = guard.read() {
+                    if !matches!(&e, wayland_client::backend::WaylandError::Io(io) if io.kind() == std::io::ErrorKind::WouldBlock) {
+                        eprintln!("wallforge-render: lost connection to the compositor ({e}); exiting"); break;
+                    }
+                }
+            } else { drop(guard); }
         }
     }
+    drop(audio);
     unsafe {
         eglMakeCurrent(dpy, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
         eglDestroySurface(dpy, esurf);

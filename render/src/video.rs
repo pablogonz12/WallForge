@@ -28,6 +28,7 @@ pub enum Matrix { Bt601, Bt709, Bt2020 }
 
 pub struct Frame {
     pub pts: f64,
+    pub pos: f64, // position inside the current loop
     pub width: u32,
     pub height: u32,
     pub matrix: Matrix,
@@ -35,7 +36,7 @@ pub struct Frame {
     pub data: Data,
 }
 
-struct Pending { frame: ff::frame::Video, pts: f64 }
+struct Pending { frame: ff::frame::Video, pts: f64, pos: f64 }
 
 #[derive(PartialEq)]
 enum State { Reading, Draining }
@@ -68,7 +69,7 @@ unsafe extern "C" fn get_vaapi_format(_c: *mut sys::AVCodecContext, fmts: *const
 }
 
 impl Decoder {
-    pub fn open(path: &str, want_hw: bool) -> Result<Decoder, String> {
+    pub fn open(path: &str, want_hw: bool, cap: f64) -> Result<Decoder, String> {
         ff::init().map_err(|e| e.to_string())?;
         unsafe { sys::av_log_set_level(sys::AV_LOG_ERROR as i32) };
         let input = ff::format::input(&path).map_err(|e| format!("open {path}: {e}"))?;
@@ -81,13 +82,15 @@ impl Decoder {
         let mut hw = false;
         unsafe {
             let c = ctx.as_mut_ptr();
+            // video much faster than the fps cap: let the decoder skip non-reference frames entirely
+            if fps >= cap * 1.9 { (*c).skip_frame = sys::AVDiscard::AVDISCARD_NONREF; }
             if want_hw {
                 let mut dev: *mut sys::AVBufferRef = ptr::null_mut();
                 let r = sys::av_hwdevice_ctx_create(&mut dev, sys::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI, ptr::null(), ptr::null_mut(), 0);
                 if r >= 0 {
                     (*c).hw_device_ctx = dev;
                     (*c).get_format = Some(get_vaapi_format);
-                    (*c).extra_hw_frames = 4;
+                    (*c).extra_hw_frames = 1;
                     hw = true;
                 }
             } else {
@@ -114,7 +117,7 @@ impl Decoder {
                     let st = *self.start_ts.get_or_insert(t);
                     let pts = t - st + self.loop_off;
                     self.last_pts = pts;
-                    self.pending = Some(Pending { frame, pts });
+                    self.pending = Some(Pending { frame, pts, pos: t - st });
                     return true;
                 }
                 Err(ff::Error::Eof) => self.restart(),
@@ -191,6 +194,6 @@ impl Decoder {
                 }
             }
         };
-        Some(Frame { pts: p.pts, width: w, height: h, matrix, full_range, data })
+        Some(Frame { pts: p.pts, pos: p.pos, width: w, height: h, matrix, full_range, data })
     }
 }

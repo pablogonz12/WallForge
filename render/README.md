@@ -17,7 +17,9 @@ wallforge-render --output DP-2 --bg <wallpaper dir | video file> \
 - Presentation is paced by `wl_surface.frame` callbacks: when the surface is hidden or the screen is off
   no callback arrives, so decoding stops (wakes 4x/s only to check for signals). Playback resumes where it stopped.
 - Surface: all anchors, exclusive zone -1, empty input region (clicks pass through). Output resize handled.
-- SIGTERM/SIGINT exit cleanly. Audio is ignored (`--silent`/`--volume` accepted).
+- SIGTERM/SIGINT exit cleanly.
+- Audio: ffmpeg decode -> libpulse-simple (PipeWire's pulse server), one extra thread, `--volume 0..100` (default 100), `--silent` off. Synced to the video clock with drift correction, loops with the video, paused with presentation. No audio stream = nothing started.
+- Fractional scale via wp-fractional-scale-v1 + wp-viewporter (buffer in physical pixels); integer scale fallback. If the compositor goes away the renderer prints a message and exits.
 - Only `video` projects are supported for now; other types exit with an error.
 
 ## Build
@@ -25,6 +27,6 @@ wallforge-render --output DP-2 --bg <wallpaper dir | video file> \
 Needs ffmpeg dev libs (libav*), libEGL, libwayland-client, libva (runtime). No protocol XML needed (bundled in crates).
 
 ## Known limits
-- Integer output scale only (no fractional-scale). Untagged video is assumed BT.709 when height >= 720.
+Untagged video is assumed BT.709 when height >= 720.
 - Looping drains the decoder and seeks to 0 (tiny hitch possible on slow disks).
 - Only `NV12`/`P010`-style 2-layer VAAPI exports are imported.
