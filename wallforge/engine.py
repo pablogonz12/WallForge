@@ -87,6 +87,14 @@ def _env(eng_dir: Path):
 
 
 def _pidfile(output): return STATE / f"{output}.pid"
+def _marker(output): return STATE / f"{output}.kind"
+
+
+def was_native(output: str) -> bool:
+    try:
+        return _marker(output).read_text() == "native"
+    except Exception:
+        return False
 
 
 def find_pids(output: str) -> list[int]:
@@ -127,10 +135,11 @@ def stop(output: str, wait: float = 3.0):
     _pidfile(output).unlink(missing_ok=True)
 
 
-def start(cfg, item: library.Item, output: str, overrides: dict | None = None) -> int:
+def start(cfg, item: library.Item, output: str, overrides: dict | None = None, legacy: bool = False) -> int:
     stop(output)
     STATE.mkdir(parents=True, exist_ok=True)
-    native = use_native(cfg, item)
+    native = use_native(cfg, item) and not legacy
+    _marker(output).write_text("native" if native else "legacy")
     args = build_native_args(cfg, item, output) if native else build_args(cfg, item, output, overrides)
     log = open(STATE / f"{output}.log", "w")
     eng_dir = Path(args[0]).parent

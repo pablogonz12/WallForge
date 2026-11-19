@@ -408,6 +408,8 @@ class Window(Adw.ApplicationWindow):
 
     def _check_crash(self, outputs):
         for o in outputs:
+            if not engine.running(o) and engine.was_native(o) and self._fallback_legacy(o):
+                continue
             if not engine.running(o):
                 tail = engine.log_tail(o, 6).strip().splitlines()
                 msg = tail[-1] if tail else "engine exited"
@@ -416,6 +418,19 @@ class Window(Adw.ApplicationWindow):
                 self.toasts.add_toast(t)
         self.refresh_playing()
         return False
+
+    def _fallback_legacy(self, o) -> bool:
+        """The native renderer died: retry once with linux-wallpaperengine if it is set up."""
+        it = next((i for i in library.scan() if i.id == self.cfg.data["outputs"].get(o, {}).get("id")), None)
+        if not it or not assets.have_assets(self.cfg.data["assets_dir"]) or not paths.find_engine(self.cfg.data["engine_dir"]):
+            return False
+        try:
+            engine.start(self.cfg, it, o, legacy=True)
+        except Exception:
+            return False
+        self.toasts.add_toast(Adw.Toast(title=f"{o}: native renderer stopped, switched to the classic engine"))
+        GLib.timeout_add_seconds(3, self._check_crash, [o])
+        return True
 
     def _periodic_update(self):
         if self.cfg.data["check_updates"]:
