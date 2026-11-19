@@ -843,7 +843,7 @@ class Window(Adw.ApplicationWindow):
         spin("Frame rate limit", "fps", 5, 240)
         spin("Volume", "volume", 0, 100)
         switch("Mute", "silent")
-        combo("Scaling", "scaling", ["fill", "fit", "stretch", "default"], "fill crops to cover the screen, fit shows all of it, stretch distorts")
+        combo("Scaling", "scaling", ["auto", "fill", "fit", "stretch", "default"], "auto picks the best fit for each wallpaper and screen, fill crops to cover, fit shows all of it, stretch distorts")
         combo("Edge behaviour", "clamp", ["clamp", "border", "repeat"])
         combo("Layer", "layer", ["bottom", "background"])
         g2 = Adw.PreferencesGroup(title="Effects and power")

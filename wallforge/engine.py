@@ -1,6 +1,7 @@
 """Launch and stop the wallpaper renderer (native wallforge-render for videos, else linux-wallpaperengine), one process per output."""
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -32,9 +33,49 @@ def use_native(cfg, item: library.Item) -> bool:
     return item.kind == "scene" and paths.find_assets(cfg.data["assets_dir"]) is not None
 
 
+_ASPECT_CACHE: dict[str, float | None] = {}
+
+
+def wallpaper_aspect(item: library.Item) -> float | None:
+    """The wallpaper's own width/height, from the scene projection or by probing the video."""
+    if item.aspect:
+        return item.aspect
+    key = str(item.run_dir)
+    if key not in _ASPECT_CACHE:
+        asp = None
+        if item.kind == "video" and paths.find_render():
+            try:
+                r = subprocess.run([str(paths.find_render()), "--check", key], capture_output=True, text=True, timeout=10)
+                j = json.loads(r.stdout.strip().splitlines()[-1])
+                if j.get("ok") and j.get("width") and j.get("height"):
+                    asp = j["width"] / j["height"]
+            except Exception:
+                pass
+        _ASPECT_CACHE[key] = asp
+    return _ASPECT_CACHE[key]
+
+
+def best_scaling(item: library.Item, output: str) -> str:
+    """Auto mode: fill (crop to cover) when little is cropped, otherwise fit so the whole picture stays visible."""
+    from . import monitors
+    try:
+        mon = next((m for m in monitors.outputs() if m["name"] == output), None)
+        wp = wallpaper_aspect(item)
+        if not mon or not wp or not mon.get("height"):
+            return "fill"
+        r = wp / (mon["width"] / mon["height"])
+        return "fill" if 0.7 <= r <= 1.43 else "fit"
+    except Exception:
+        return "fill"
+
+
 def build_native_args(cfg, item: library.Item, output: str, overrides: dict | None = None) -> list[str]:
     e = cfg.data["engine"]
-    scaling = e["scaling"] if e["scaling"] in ("fill", "fit", "stretch") else "fill"
+    scaling = e["scaling"]
+    if scaling == "auto":
+        scaling = best_scaling(item, output)
+    elif scaling not in ("fill", "fit", "stretch"):
+        scaling = "fill"
     props = item.properties()
     vals = dict(item.defaults())
     vals.update(cfg.values_for(item.id))
@@ -78,7 +119,7 @@ def build_args(cfg, item: library.Item, output: str, overrides: dict | None = No
     imgs = {k: v for k, v in vals.items() if (props.get(k) or {}).get("type") == "scenetexture"}
     run = texpatch.patched_dir(item.run_dir, imgs) if imgs else None
     a = [str(eng), "--screen-root", output, "--bg", str(run or item.run_dir), "--assets-dir", assets,
-         "--scaling", e["scaling"], "--clamp", e["clamp"], "--fps", str(e["fps"]),
+         "--scaling", ("fill" if e["scaling"] == "auto" else e["scaling"]), "--clamp", e["clamp"], "--fps", str(e["fps"]),
          "--layer", e.get("layer", "bottom")]
     if e.get("silent"):
         a.append("--silent")

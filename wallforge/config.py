@@ -10,7 +10,7 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / 
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULTS = {
-    "version": 2,
+    "version": 3,
     "engine_dir": "",  # empty -> auto-detect
     "renderer": "native",  # native (wallforge-render, used where it can) | legacy (linux-wallpaperengine only)
     "assets_dir": "",  # empty -> auto (own download, then Steam)
@@ -25,7 +25,7 @@ DEFAULTS = {
     "last_update_check": 0,
     "window": {"w": 1280, "h": 800},
     "engine": {
-        "scaling": "fill",  # fill (crop) | fit | stretch | default
+        "scaling": "auto",  # auto (best fit per wallpaper and screen) | fill (crop) | fit | stretch | default
         "clamp": "clamp",  # clamp|border|repeat
         "fps": 30,
         "layer": "bottom",  # bottom|background (background pairs with niri place-within-backdrop)
@@ -74,6 +74,11 @@ class Config:
             if self.data["engine"].get("scaling") == "default":
                 self.data["engine"]["scaling"] = "fill"
             self.data["version"] = 2
+            self.save()
+        if self.data.get("version", 1) < 3:  # v3: "auto" became the default scaling; move users still on the old default
+            if self.data["engine"].get("scaling") == "fill":
+                self.data["engine"]["scaling"] = "auto"
+            self.data["version"] = 3
             self.save()
 
     def save(self):
