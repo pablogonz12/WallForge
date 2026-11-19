@@ -284,7 +284,7 @@ class Window(Adw.ApplicationWindow):
 
         outs = self._mons or monitors.outputs()
         if it.ultrawide:
-            note = Gtk.Label(label="Made for ultrawide screens. On 16:9 monitors it is skipped unless you allow it in Settings.",
+            note = Gtk.Label(label="Made for ultrawide screens. On 16:9 monitors it is cropped to fill (turn that off in Settings to skip it).",
                              xalign=0, wrap=True)
             note.add_css_class("dim-label")
             box.append(note)
@@ -815,7 +815,7 @@ class Window(Adw.ApplicationWindow):
         top_switch(gc, "Show anime wallpapers", "show_anime", "Hidden by default in Library and Discover.", refresh_filters)
         top_switch(gc, "Hide mature content in Discover", "safe_content", "Filters Mature and Questionable Workshop items.", refresh_filters)
         top_switch(gc, "Allow ultrawide wallpapers on 16:9 screens", "ultrawide_on_16_9",
-                   "Off: 21:9 / dual-monitor wallpapers are hidden (if you have no ultrawide screen) and skipped on 16:9 outputs.",
+                   "On: 21:9 and dual-monitor wallpapers apply to 16:9 screens, cropped to fill. Off: they are hidden and skipped there.",
                    refresh_filters)
 
         # --- playback
@@ -843,7 +843,7 @@ class Window(Adw.ApplicationWindow):
         spin("Frame rate limit", "fps", 5, 240)
         spin("Volume", "volume", 0, 100)
         switch("Mute", "silent")
-        combo("Scaling", "scaling", ["auto", "fill", "fit", "stretch", "default"], "auto picks the best fit for each wallpaper and screen, fill crops to cover, fit shows all of it, stretch distorts")
+        combo("Scaling", "scaling", ["auto", "fill", "fit", "stretch", "default"], "auto crops to fill the screen (ultrawide art included) and only fits portrait wallpapers; fill crops, fit shows all of it, stretch distorts")
         combo("Edge behaviour", "clamp", ["clamp", "border", "repeat"])
         combo("Layer", "layer", ["bottom", "background"])
         g2 = Adw.PreferencesGroup(title="Effects and power")

@@ -11,7 +11,7 @@ Wallforge is a GTK4 / libadwaita app and a tiny GPU renderer (`wallforge-render`
 |---|---|
 | **Self-contained** | Its own Rust renderer plays video and scene wallpapers. `linux-wallpaperengine` is not needed. |
 | **Light on the GPU** | VAAPI hardware decode, zero-copy import, compressed textures kept compressed, pauses when hidden. A 1080p video wallpaper takes about 93 MiB of VRAM, 53 MiB with software decode. |
-| **Looks right by default** | **Auto fit** picks fill or fit per wallpaper and per screen, so ultrawide, portrait and 16:9 art all land well without touching a setting. |
+| **Looks right by default** | **Auto fit** fills the screen (ultrawide art is cropped) and keeps portrait art whole, with no setting to touch. |
 | **Your palette follows** | Noctalia, matugen, wallust, pywal or your own command pick up each wallpaper's colours. |
 | **Stays up to date** | A git install updates itself in the background, checks that the new version loads and rolls back if it does not. |
 
@@ -20,8 +20,8 @@ Wallforge is a GTK4 / libadwaita app and a tiny GPU renderer (`wallforge-render`
 - **Library** of everything you subscribed to, with search, type filter, sort, favourites and a random button.
 - **All property types** editable per wallpaper (sliders, colours, combos, text, and image slots), applied live.
 - **Discover tab** to browse the Steam Workshop, with one-click Get through your running Steam client (experimental: if the click fails, Steam opens the page for you).
-- **Per monitor**: apply to one screen or all, ultrawide wallpapers skipped on 16:9 screens by default.
-- **Auto scaling** (default): crops when little is lost, shows the whole picture when the aspect ratios differ a lot. Fill, fit and stretch stay one click away in Settings.
+- **Per monitor**: apply to one screen or all, ultrawide wallpapers are cropped to fill 16:9 screens (or skipped, if you prefer).
+- **Auto scaling** (default): crops to fill the screen, ultrawide art included, and only fits portrait wallpapers whole. Fill, fit and stretch stay one click away in Settings.
 - **Sensible defaults**: anime and mature content hidden (switch them on in Settings).
 - **Works on** niri, Hyprland, Sway and other wlroots compositors (monitor detection falls back to GDK).
 - **Autostart**: `wallforge.sh --restore` re-applies your saved wallpapers at login (toggle in Settings).

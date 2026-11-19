@@ -10,14 +10,14 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / 
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULTS = {
-    "version": 3,
+    "version": 4,
     "engine_dir": "",  # empty -> auto-detect
     "renderer": "native",  # native (wallforge-render, used where it can) | legacy (linux-wallpaperengine only)
     "assets_dir": "",  # empty -> auto (own download, then Steam)
     "palette_backend": "auto",  # auto|noctalia|matugen|wallust|pywal|custom|none
     "palette_command": "",  # custom: shell command, {image} is replaced
     "show_anime": False,
-    "ultrawide_on_16_9": False,  # allow ultrawide wallpapers on 16:9 screens
+    "ultrawide_on_16_9": True,  # allow ultrawide wallpapers on 16:9 screens (cropped to fill)
     "safe_content": True,  # Discover hides Mature/Questionable
     "autostart": False,
     "check_updates": True,
@@ -79,6 +79,10 @@ class Config:
             if self.data["engine"].get("scaling") == "fill":
                 self.data["engine"]["scaling"] = "auto"
             self.data["version"] = 3
+            self.save()
+        if self.data.get("version", 1) < 4:  # v4: ultrawide wallpapers are allowed on 16:9 screens (cropped)
+            self.data["ultrawide_on_16_9"] = True
+            self.data["version"] = 4
             self.save()
 
     def save(self):

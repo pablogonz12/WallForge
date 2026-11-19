@@ -56,7 +56,7 @@ def wallpaper_aspect(item: library.Item) -> float | None:
 
 
 def best_scaling(item: library.Item, output: str) -> str:
-    """Auto mode: fill (crop to cover) when little is cropped, otherwise fit so the whole picture stays visible."""
+    """Auto mode: fill (crop to cover) unless the picture is much narrower than the screen (portrait), which fit keeps whole."""
     from . import monitors
     try:
         mon = next((m for m in monitors.outputs() if m["name"] == output), None)
@@ -64,7 +64,7 @@ def best_scaling(item: library.Item, output: str) -> str:
         if not mon or not wp or not mon.get("height"):
             return "fill"
         r = wp / (mon["width"] / mon["height"])
-        return "fill" if 0.7 <= r <= 1.43 else "fit"
+        return "fill" if r >= 0.7 else "fit"
     except Exception:
         return "fill"
 
@@ -84,7 +84,7 @@ def build_native_args(cfg, item: library.Item, output: str, overrides: dict | No
     if item.kind == "scene":
         imgs = {k: v for k, v in vals.items() if (props.get(k) or {}).get("type") == "scenetexture"}
         if imgs:
-            run = texpatch.patched_dir(item.run_dir, imgs)
+            run = texpatch.patched_dir(item.run_dir, imgs) or item.run_dir  # None when there is no package to patch
     a = [str(paths.find_render()), "--output", output, "--bg", str(run), "--scaling", scaling,
          "--fps", str(e["fps"]), "--layer", e.get("layer", "bottom")]
     if e.get("silent"):
