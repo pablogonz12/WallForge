@@ -20,6 +20,7 @@ pub struct Tex {
     pub img_w: u32, pub img_h: u32, // logical image size
     pub flags: u32,
     pub payload: Payload,
+    pub frame: Option<(u32, u32)>, // sprite-sheet frame size (TEXS section)
 }
 
 pub const FLAG_NO_INTERP: u32 = 1;
@@ -83,7 +84,15 @@ pub fn parse(b: &[u8], header_only: bool) -> Result<Tex, String> {
     if ver == 4 { mp4 = r.u32()? == 1; }
     let mut layout = ver.min(3);
     if ver == 4 && mp4 { layout = 4; }
-    let mk = |payload| Tex { tex_w, tex_h, img_w, img_h, flags, payload };
+    let frame = b.windows(8).position(|w| w == b"TEXS0003" || w == b"TEXS0002" || w == b"TEXS0001").and_then(|i| {
+        let g = |o: usize| b.get(i + 9 + o..i + 13 + o).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]));
+        let f = |o: usize| b.get(i + 9 + o..i + 13 + o).map(|x| f32::from_le_bytes([x[0], x[1], x[2], x[3]]));
+        let (n, fw, fh) = (g(0)?, g(4)?, g(8)?);
+        let _ = f(0);
+        if n > 1 && fw > 0 && fh > 0 && fw <= tex_w && fh <= tex_h { Some((fw, fh)) } else { None }
+    });
+    if std::env::var("WF_DBG").is_ok() { eprintln!("tex frame={:?} {}x{} img {}x{}", frame, tex_w, tex_h, img_w, img_h); }
+    let mk = |payload| Tex { tex_w, tex_h, img_w, img_h, flags, payload, frame };
     if header_only { return Ok(mk(Payload::Raw { fmt: fmt_of(format).unwrap_or(Fmt::Rgba8), mips: vec![] })); }
     // Only the first image matters for a still texture (more images = gif/sprite frames; frame 0 is used).
     let nmip = r.u32()?;
@@ -108,6 +117,7 @@ pub fn parse(b: &[u8], header_only: bool) -> Result<Tex, String> {
         if fif >= 0 || mp4 { break; } // embedded file: only one payload
     }
     if mp4 { return Ok(mk(Payload::Mp4(mips.remove(0).data))); }
+    if mips.len() == 1 && mips[0].data.len() > 12 && &mips[0].data[4..8] == b"ftyp" { return Ok(mk(Payload::Mp4(mips.remove(0).data))); }
     if fif >= 0 || (mips.len() == 1 && sniff_image(&mips[0].data)) {
         if sniff_image(&mips[0].data) { return Ok(mk(Payload::Image(mips.remove(0).data))); }
         if fif >= 0 && format != 0 && format != 4 && format != 6 && format != 7 && format != 8 && format != 9 { return Err("tex: unknown embedded payload".into()); }
@@ -223,7 +233,8 @@ pub fn has_s3tc() -> bool {
 /// Upload with the smallest footprint for an on-screen size of about (want_w, want_h) pixels:
 /// the first mip not smaller than that is uploaded alone (no mip chain), compressed data stays compressed.
 pub fn upload(t: &Tex, want_w: u32, want_h: u32, meta: &TexMeta, s3tc: bool) -> Result<GlTex, String> {
-    let (want_w, want_h) = (want_w.max(1), want_h.max(1));
+    let (mut want_w, mut want_h) = (want_w.max(1), want_h.max(1));
+    if let Some((fw, fh)) = t.frame { want_w = (want_w as f32 * t.tex_w as f32 / fw as f32) as u32; want_h = (want_h as f32 * t.tex_h as f32 / fh as f32) as u32; }
     let mut flags = t.flags;
     if meta.clamp == Some(true) { flags |= FLAG_CLAMP; }
     if meta.no_interp == Some(true) { flags |= FLAG_NO_INTERP; }
@@ -250,6 +261,7 @@ pub fn upload(t: &Tex, want_w: u32, want_h: u32, meta: &TexMeta, s3tc: bool) -> 
             for (i, m) in mips.iter().enumerate() { if m.w >= want_w && m.h >= want_h { li = i; } }
             let m = &mips[li];
             uv = uv_scale((t.img_w, t.img_h), (mips[0].w, mips[0].h));
+            if let Some((fw, fh)) = t.frame { uv = [fw as f32 / t.tex_w as f32, fh as f32 / t.tex_h as f32]; }
             let (mut w, mut h, mut data, mut fm) = (m.w, m.h, m.data.clone(), *fmt);
             let is_dxt = matches!(fm, Fmt::Dxt1 | Fmt::Dxt3 | Fmt::Dxt5);
             // no smaller mip stored and a big reduction wanted: shrink on the CPU (decode DXT first)

@@ -94,7 +94,7 @@ struct Layer {
 pub struct Engine {
     layers: Vec<Layer>, prog: u32, u_mvp: i32, u_size: i32, u_tint: i32, u_flip: i32, u_uvs: i32,
     vao: u32, view: Mat4, pub clear: [f32; 3], scene_wh: (f32, f32),
-    pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>,
+    pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32,
     out: (i32, i32), scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
     t0: std::time::Instant, time_override: Option<f32>,
 }
@@ -135,7 +135,7 @@ impl Engine {
             gl::Disable(gl::DEPTH_TEST); gl::Disable(gl::DITHER); gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
         }
         let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"),
-            vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None,
+            vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
             out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None };
         e.rebuild();
         Ok(e)
@@ -144,6 +144,16 @@ impl Engine {
     pub fn set_time(&mut self, t: Option<f32>) { self.time_override = t; }
 
     pub fn resize(&mut self, out: (i32, i32)) { if out != self.out { self.out = out; self.rebuild(); } }
+
+    fn white_tex(&mut self) -> u32 {
+        if self.white == 0 { unsafe {
+            gl::GenTextures(1, &mut self.white); gl::BindTexture(gl::TEXTURE_2D, self.white);
+            let px = [255u8; 4];
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8 as i32, 1, 1, 0, gl::RGBA, gl::UNSIGNED_BYTE, px.as_ptr() as *const _);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32); gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+        } }
+        self.white
+    }
 
     fn note(&mut self, s: String) { eprintln!("wallforge-render: {s}"); self.notes.push(s); }
 
@@ -162,9 +172,14 @@ impl Engine {
                 (o.name.clone(), model.clone(), o.size, o.scale, o.color, o.alpha, o.blend.clone())
             };
             let Some(def) = scene::load_image(&self.vfs, &model) else { self.note(format!("layer '{name}': model/material '{model}' not found, skipped")); continue };
-            let Some(tp) = def.tex_path.clone() else { self.note(format!("layer '{name}': no texture, skipped")); continue };
+            let solid = def.tex_path.is_none() && (def.material.shader.contains("solid") || def.material.shader.contains("flat"));
+            let tp = match def.tex_path.clone() { Some(t) => t, None if solid => String::new(), None => { self.note(format!("layer '{name}': no texture, skipped")); continue } };
             let full = tp.ends_with("_rt_FullFrameBuffer.tex");
-            let (size, px, gt) = if full {
+            let (size, px, gt) = if solid {
+                let sz = size_o.or(def.size_hint).unwrap_or([self.scene_wh.0, self.scene_wh.1]);
+                let px = ((sz[0] * scale[0].abs() * sx).ceil().max(1.0) as i32, (sz[1] * scale[1].abs() * sy).ceil().max(1.0) as i32);
+                (sz, px, GlTex { id: self.white_tex(), w: 1, h: 1, bytes: 4, compressed: false, flags: 0, src: (1, 1), uv: [1.0, 1.0] })
+            } else if full {
                 ([self.scene_wh.0, self.scene_wh.1], self.out, GlTex { id: 0, w: 0, h: 0, bytes: 0, compressed: false, flags: 0, src: (0, 0), uv: [1.0, 1.0] })
             } else {
             let Some(bytes) = self.vfs.read(&tp) else { self.note(format!("layer '{name}': texture {tp} not found, skipped")); continue };
