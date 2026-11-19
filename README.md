@@ -54,9 +54,10 @@ cd wallforge
 
 ## Updates
 
-Wallforge checks GitHub once a day (switch it off in Settings > Updates). A git clone updates itself with an
-"Update" button in the notification (`git pull --ff-only`, restart afterwards). The AUR package only tells you
-and leaves the update to your package manager. The package lives in `packaging/aur/`.
+Wallforge checks GitHub at start and every few hours (switch it off in Settings > Updates). A git clone updates
+itself like Steam does: it downloads the new version in the background (`git pull --ff-only`), checks that it loads
+(and rolls back if not), then shows "Restart now". Turn that off to get an "Update" button instead. Local edits in
+the folder are never overwritten. The AUR package only tells you and leaves the update to your package manager. The package lives in `packaging/aur/`.
 
 ## Disclaimer
 
