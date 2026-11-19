@@ -19,6 +19,7 @@ that engine lacks: a library, per-wallpaper settings, Workshop browsing, per-mon
 - **Autostart**: `wallforge.sh --restore` re-applies your saved wallpapers at login (toggle in Settings).
 - Engine crash toast with a "View log" button, remembered window size, keyboard shortcuts
   (`Ctrl+F` search, `Ctrl+R` random, `Ctrl+,` settings, `F5` rescan).
+- **Native renderer (beta)**: `wallforge-render`, a small Rust renderer for video wallpapers (VAAPI hardware decode, zero-copy GPU import, pauses when hidden). Turn it on in Settings > Setup. Scenes still use linux-wallpaperengine for now. See `render/README.md`.
 - Detects unsupported 3D scenes up front instead of failing with an engine error.
 
 ## You do not need Wallpaper Engine installed, but you do need to own it
@@ -35,7 +36,8 @@ Workshop wallpapers themselves are downloaded by the Steam client when you subsc
 ## Requirements
 
 - Python 3.11+, GTK 4, libadwaita 1.5+, PyGObject, Pillow, aiohttp, ffmpeg (for palette stills)
-- [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) installed (AUR: `linux-wallpaperengine-git`)
+- For the native renderer (optional, beta): Rust/cargo to build it (`install.sh` does it), ffmpeg, libva, EGL
+- [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) installed (AUR: `linux-wallpaperengine-git`), needed for scene wallpapers
 - Steam running, signed in to an account that owns Wallpaper Engine, for Discover > Get
 - A Wayland compositor with layer-shell support (niri, Hyprland, Sway, ...)
 

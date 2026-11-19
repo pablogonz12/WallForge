@@ -8,4 +8,8 @@ sed "s|@EXEC@|$here/wallforge.sh|" "$here/data/dev.wallforge.Wallforge.desktop.i
 cp "$here/assets/wallforge.svg" "$data/icons/hicolor/scalable/apps/dev.wallforge.Wallforge.svg"
 cp "$here/assets/wallforge-symbolic.svg" "$data/icons/hicolor/symbolic/apps/dev.wallforge.Wallforge-symbolic.svg"
 gtk-update-icon-cache -f -t "$data/icons/hicolor" 2>/dev/null || true
+if [ -f "$here/render/Cargo.toml" ] && command -v cargo >/dev/null; then
+  echo "Building the native renderer (beta)..."
+  (cd "$here/render" && cargo build --release -q) && echo "Native renderer built." || echo "Native renderer build failed (optional)."
+fi
 echo "Installed. Find Wallforge in your app menu."

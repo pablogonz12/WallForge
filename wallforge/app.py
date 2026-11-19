@@ -374,7 +374,8 @@ class Window(Adw.ApplicationWindow):
                 self.toasts.add_toast(Adw.Toast(title=f"Skipped {', '.join(skipped)}: ultrawide wallpaper on a 16:9 screen"))
                 if not outputs:
                     return
-        if not assets.have_assets(self.cfg.data["assets_dir"]) or not paths.find_engine(self.cfg.data["engine_dir"]):
+        if not engine.use_native(self.cfg, it) and (not assets.have_assets(self.cfg.data["assets_dir"])
+                                                     or not paths.find_engine(self.cfg.data["engine_dir"])):
             self._check_setup()
             self.toasts.add_toast(Adw.Toast(title="Finish setup first (Settings > Setup)"))
             return
@@ -709,6 +710,38 @@ class Window(Adw.ApplicationWindow):
                               "Not found. Install linux-wallpaperengine from your package manager or the AUR.")
         r_eng.add_prefix(Gtk.Image(icon_name="emblem-ok-symbolic" if eng else "dialog-warning-symbolic"))
         gs.add(r_eng)
+        rn = paths.find_render()
+        r_nat = Adw.SwitchRow(title="Native renderer (beta)", active=c.get("renderer") == "native",
+                              subtitle="Plays video wallpapers with Wallforge's own Rust renderer (hardware decode, no extra "
+                              "engine needed). Scene wallpapers still use linux-wallpaperengine." +
+                              (f" Found: {rn}" if rn else " Not built yet."))
+        r_nat.set_sensitive(bool(rn))
+        r_nat.connect("notify::active", lambda rr, _p: (c.update(renderer="native" if rr.get_active() else "legacy"), self.cfg.save()))
+        gs.add(r_nat)
+        src = paths.render_source()
+        if not rn and src and shutil.which("cargo"):
+            r_b = Adw.ActionRow(title="Build the native renderer", subtitle="Runs cargo build --release (a few minutes the first time).")
+            b_b = Gtk.Button(label="Build", valign=Gtk.Align.CENTER)
+
+            def do_build(btn):
+                import subprocess
+                btn.set_sensitive(False)
+                btn.set_label("Building...")
+
+                def work():
+                    r = subprocess.run(["cargo", "build", "--release"], cwd=str(src), capture_output=True, text=True)
+                    ok = r.returncode == 0 and paths.find_render() is not None
+                    err = (r.stderr.strip().splitlines() or ["Build failed"])[-1][:120]
+
+                    def done():
+                        btn.set_label("Done, reopen Settings" if ok else "Failed")
+                        self.toasts.add_toast(Adw.Toast(title="Native renderer built" if ok else "Build failed: " + err))
+                        return False
+                    GLib.idle_add(done)
+                threading.Thread(target=work, daemon=True).start()
+            b_b.connect("clicked", do_build)
+            r_b.add_suffix(b_b)
+            gs.add(r_b)
         ap = paths.find_assets(c["assets_dir"])
         r_as = Adw.ActionRow(title="Wallpaper Engine assets", subtitle=str(ap) if ap else "Not found")
         r_as.add_prefix(Gtk.Image(icon_name="emblem-ok-symbolic" if ap else "dialog-warning-symbolic"))

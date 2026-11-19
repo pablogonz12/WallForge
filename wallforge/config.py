@@ -12,6 +12,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 DEFAULTS = {
     "version": 2,
     "engine_dir": "",  # empty -> auto-detect
+    "renderer": "legacy",  # legacy (linux-wallpaperengine) | native (wallforge-render, beta; videos only)
     "assets_dir": "",  # empty -> auto (own download, then Steam)
     "palette_backend": "auto",  # auto|noctalia|matugen|wallust|pywal|custom|none
     "palette_command": "",  # custom: shell command, {image} is replaced

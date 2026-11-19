@@ -3,15 +3,14 @@ pkgname=wallforge-git
 _pkgname=wallforge
 pkgver=r0.0000000
 pkgrel=1
-pkgdesc='GTK4 front end for linux-wallpaperengine: library, settings, Workshop browser, per-monitor control'
-arch=('any')
+pkgdesc='GTK4 front end for Wallpaper Engine wallpapers: library, settings, Workshop browser, per-monitor control'
+arch=('x86_64' 'aarch64')
 url='https://github.com/pgm1207/wallforge'
 license=('MIT')
-depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'python-pillow' 'python-aiohttp' 'git')
-makedepends=('git')
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'python-pillow' 'python-aiohttp' 'git' 'ffmpeg' 'libva' 'libglvnd')
+makedepends=('git' 'rust' 'clang')
 optdepends=('linux-wallpaperengine-git: the wallpaper engine itself (or another linux-wallpaperengine package)'
             'steam: subscribe to Workshop wallpapers and fetch Wallpaper Engine assets'
-            'ffmpeg: still frames for palette sync'
             'matugen: palette sync'
             'wallust: palette sync'
             'python-pywal: palette sync')
@@ -25,12 +24,19 @@ pkgver() {
   printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
+build() {
+  cd "$_pkgname/render"
+  cargo build --release --locked
+}
+
 package() {
   cd "$_pkgname"
   install -d "$pkgdir/usr/lib/$_pkgname"
   cp -r wallforge "$pkgdir/usr/lib/$_pkgname/"
   find "$pkgdir/usr/lib/$_pkgname" -name __pycache__ -prune -exec rm -rf {} +
   printf 'COMMIT = "%s"\n' "$(git rev-parse HEAD)" > "$pkgdir/usr/lib/$_pkgname/wallforge/_build.py"
+
+  install -Dm755 render/target/release/wallforge-render "$pkgdir/usr/lib/$_pkgname/wallforge-render"
 
   install -Dm755 /dev/stdin "$pkgdir/usr/bin/wallforge" <<'WRAP'
 #!/bin/sh

@@ -99,3 +99,27 @@ def find_engine(configured: str = "") -> Path | None:
         except Exception:
             pass
     return None
+
+
+def find_render(configured: str = "") -> Path | None:
+    """Locate the native wallforge-render binary: source tree build, system install, PATH."""
+    here = Path(__file__).resolve().parent
+    cands = [Path(configured) / "wallforge-render"] if configured else []
+    cands += [here.parent / "render/target/release/wallforge-render", here.parent / "wallforge-render",
+              Path("/usr/lib/wallforge/wallforge-render")]
+    w = shutil.which("wallforge-render")
+    if w:
+        cands.append(Path(w))
+    for c in cands:
+        try:
+            if c.is_file() and os.access(c, os.X_OK):
+                return c
+        except Exception:
+            pass
+    return None
+
+
+def render_source() -> Path | None:
+    """The render/ crate when running from a git checkout (so it can be built in place)."""
+    d = Path(__file__).resolve().parent.parent / "render"
+    return d if (d / "Cargo.toml").is_file() else None

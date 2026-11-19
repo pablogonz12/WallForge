@@ -1,4 +1,4 @@
-"""Launch and stop linux-wallpaperengine, one process per output."""
+"""Launch and stop the wallpaper renderer (native wallforge-render for videos, else linux-wallpaperengine), one process per output."""
 from __future__ import annotations
 
 import os
@@ -21,6 +21,24 @@ def _fmt(spec: dict, val) -> str:
             return " ".join(str(v) for v in val)
         return str(val)
     return str(val)
+
+
+def use_native(cfg, item: library.Item) -> bool:
+    """Native renderer (beta) is on, installed, and the wallpaper is a plain video."""
+    return (cfg.data.get("renderer") == "native" and item.kind == "video" and not item.broken
+            and paths.find_render() is not None)
+
+
+def build_native_args(cfg, item: library.Item, output: str) -> list[str]:
+    e = cfg.data["engine"]
+    scaling = e["scaling"] if e["scaling"] in ("fill", "fit", "stretch") else "fill"
+    a = [str(paths.find_render()), "--output", output, "--bg", str(item.run_dir), "--scaling", scaling,
+         "--fps", str(e["fps"]), "--layer", e.get("layer", "bottom")]
+    if e.get("silent"):
+        a.append("--silent")
+    else:
+        a += ["--volume", str(e["volume"])]
+    return a
 
 
 def build_args(cfg, item: library.Item, output: str, overrides: dict | None = None) -> list[str]:
@@ -76,11 +94,12 @@ def find_pids(output: str) -> list[int]:
     res = []
     for p in Path("/proc").glob("[0-9]*"):
         try:
-            if not (p / "comm").read_text().startswith("linux-wallpaper"):
+            comm = (p / "comm").read_text()
+            if not comm.startswith(("linux-wallpaper", "wallforge-rend")):
                 continue
             args = (p / "cmdline").read_bytes().split(b"\0")
             for i, a in enumerate(args[:-1]):
-                if a in (b"--screen-root", b"-r") and args[i + 1].decode(errors="replace") == output:
+                if a in (b"--screen-root", b"-r", b"--output") and args[i + 1].decode(errors="replace") == output:
                     res.append(int(p.name))
                     break
         except Exception:
@@ -111,10 +130,11 @@ def stop(output: str, wait: float = 3.0):
 def start(cfg, item: library.Item, output: str, overrides: dict | None = None) -> int:
     stop(output)
     STATE.mkdir(parents=True, exist_ok=True)
-    args = build_args(cfg, item, output, overrides)
+    native = use_native(cfg, item)
+    args = build_native_args(cfg, item, output) if native else build_args(cfg, item, output, overrides)
     log = open(STATE / f"{output}.log", "w")
     eng_dir = Path(args[0]).parent
-    p = subprocess.Popen(args, cwd=str(eng_dir), env=_env(eng_dir), stdout=log, stderr=subprocess.STDOUT,
+    p = subprocess.Popen(args, cwd=str(eng_dir), env=dict(os.environ) if native else _env(eng_dir), stdout=log, stderr=subprocess.STDOUT,
                          start_new_session=True)
     _pidfile(output).write_text(str(p.pid))
     return p.pid

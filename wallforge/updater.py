@@ -73,7 +73,22 @@ def update() -> str:
     if not _healthy():
         _git("reset", "--hard", old)
         raise RuntimeError("The new version did not load, kept the old one")
+    _rebuild_render(old)
     return _git("log", "-1", "--format=%h %s")
+
+
+def _rebuild_render(old: str) -> None:
+    """If the native renderer was built and its sources changed, rebuild it (best effort, keeps the old binary on failure)."""
+    import shutil
+    crate = ROOT / "render"
+    if not (crate / "target/release/wallforge-render").is_file() or not shutil.which("cargo"):
+        return
+    try:
+        if not _git("diff", "--name-only", old, "HEAD", "--", "render"):
+            return
+        subprocess.run(["cargo", "build", "--release", "-q"], cwd=str(crate), capture_output=True, timeout=900)
+    except Exception:
+        pass
 
 
 def restart() -> None:
