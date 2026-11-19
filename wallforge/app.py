@@ -134,7 +134,14 @@ class Window(Adw.ApplicationWindow):
             if time.time() - self.cfg.data["last_update_check"] > 6 * 3600:
                 GLib.timeout_add_seconds(5, lambda: (self.check_update(quiet=True), False)[1])
             GLib.timeout_add_seconds(6 * 3600, self._periodic_update)
-        threading.Thread(target=updater.ensure_render, daemon=True).start()
+        self._building = not paths.find_render() and bool(shutil.which("cargo"))
+
+        def build():
+            updater.ensure_render()
+            self._building = False
+            GLib.idle_add(self._check_setup)
+
+        threading.Thread(target=build, daemon=True).start()
         GLib.timeout_add_seconds(4, self._watch)
         GLib.timeout_add_seconds(3, self._poll_playing)
 
@@ -543,6 +550,14 @@ class Window(Adw.ApplicationWindow):
         The classic linux-wallpaperengine is never required."""
         miss = []
         if not paths.find_render() and not paths.find_engine(self.cfg.data["engine_dir"]):
+            if getattr(self, "_building", False):
+                self.banner.set_title("Building the Wallforge renderer, this takes a minute or two...")
+                self.banner.set_revealed(True)
+                return
+            if not shutil.which("cargo"):
+                self.banner.set_title("Wallforge needs Rust to build its renderer: install rust and clang (Arch: sudo pacman -S rust clang), then restart.")
+                self.banner.set_revealed(True)
+                return
             miss.append("the Wallforge renderer")
         elif any(i.kind == "scene" and not i.broken for i in self.items) and not assets.have_assets(self.cfg.data["assets_dir"]):
             miss.append("Wallpaper Engine's assets (needed for scene wallpapers)")
