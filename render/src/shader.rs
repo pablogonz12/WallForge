@@ -35,10 +35,51 @@ precision highp sampler2D;
 #define common wf_common
 #define active wf_active
 #define partition wf_partition
-#define texture2D texture
-#define texSample2D texture
+#define texture2D wf_tex
+#define texSample2D wf_tex
 #define texSample2DLod textureLod
 #define texture2DLod textureLod
+float wf_max(float a, float b) { return max(a, b); }
+vec2 wf_max(vec2 a, vec2 b) { return max(a, b); }
+vec3 wf_max(vec3 a, vec3 b) { return max(a, b); }
+vec4 wf_max(vec4 a, vec4 b) { return max(a, b); }
+vec2 wf_max(vec2 a, float b) { return max(a, vec2(b)); }
+vec2 wf_max(float a, vec2 b) { return max(vec2(a), b); }
+vec3 wf_max(vec3 a, float b) { return max(a, vec3(b)); }
+vec3 wf_max(float a, vec3 b) { return max(vec3(a), b); }
+vec4 wf_max(vec4 a, float b) { return max(a, vec4(b)); }
+vec4 wf_max(float a, vec4 b) { return max(vec4(a), b); }
+#define max wf_max
+float wf_min(float a, float b) { return min(a, b); }
+vec2 wf_min(vec2 a, vec2 b) { return min(a, b); }
+vec3 wf_min(vec3 a, vec3 b) { return min(a, b); }
+vec4 wf_min(vec4 a, vec4 b) { return min(a, b); }
+vec2 wf_min(vec2 a, float b) { return min(a, vec2(b)); }
+vec2 wf_min(float a, vec2 b) { return min(vec2(a), b); }
+vec3 wf_min(vec3 a, float b) { return min(a, vec3(b)); }
+vec3 wf_min(float a, vec3 b) { return min(vec3(a), b); }
+vec4 wf_min(vec4 a, float b) { return min(a, vec4(b)); }
+vec4 wf_min(float a, vec4 b) { return min(vec4(a), b); }
+#define min wf_min
+float wf_pow(float a, float b) { return pow(a, b); }
+vec2 wf_pow(vec2 a, vec2 b) { return pow(a, b); }
+vec3 wf_pow(vec3 a, vec3 b) { return pow(a, b); }
+vec4 wf_pow(vec4 a, vec4 b) { return pow(a, b); }
+vec2 wf_pow(vec2 a, float b) { return pow(a, vec2(b)); }
+vec3 wf_pow(vec3 a, float b) { return pow(a, vec3(b)); }
+vec4 wf_pow(vec4 a, float b) { return pow(a, vec4(b)); }
+#define pow wf_pow
+float wf_mix(float a, float b, float t) { return mix(a, b, t); }
+vec2 wf_mix(vec2 a, vec2 b, vec2 t) { return mix(a, b, t); }
+vec3 wf_mix(vec3 a, vec3 b, vec3 t) { return mix(a, b, t); }
+vec4 wf_mix(vec4 a, vec4 b, vec4 t) { return mix(a, b, t); }
+vec2 wf_mix(vec2 a, vec2 b, float t) { return mix(a, b, t); }
+vec3 wf_mix(vec3 a, vec3 b, float t) { return mix(a, b, t); }
+vec4 wf_mix(vec4 a, vec4 b, float t) { return mix(a, b, t); }
+vec3 wf_mix(vec4 a, vec3 b, float t) { return mix(a.rgb, b, t); }
+#define mix wf_mix
+vec4 wf_tex(sampler2D s, vec2 c) { return texture(s, c); }
+vec4 wf_tex(sampler2D s, vec4 c) { return texture(s, c.xy); }
 ";
 
 fn expand(read: &dyn Fn(&str) -> Option<String>, src: &str, depth: u32, out: &mut String) -> Result<(), String> {
@@ -103,8 +144,23 @@ fn stage(read: &dyn Fn(&str) -> Option<String>, path: &str, is_frag: bool, over:
     // C preprocessor semantics: unknown identifiers in #if/#elif evaluate to 0 (GLSL ES makes them an error)
     for k in undefined_in_conditions(&src) { if !all.contains_key(&k) { all.insert(k, "0".into()); } }
     for (k, v) in &all { o.push_str(&format!("#define {k} {v}\n")); }
+    let src = hoist_uniforms(&src);
     o.push_str(&if floatify { floatify_src(&src) } else { src });
     Ok(o)
+}
+
+/// Moves unconditional single-line `uniform` declarations to the top (WE's compiler accepts use-before-declaration).
+pub fn hoist_uniforms(src: &str) -> String {
+    let (mut head, mut body) = (String::new(), String::new());
+    let mut depth = 0;
+    for line in src.lines() {
+        let t = line.trim_start();
+        if t.starts_with("#if") { depth += 1; } else if t.starts_with("#endif") { depth -= 1; }
+        let dst = if depth == 0 && t.starts_with("uniform ") && t.contains(';') { &mut head } else { &mut body };
+        dst.push_str(line); dst.push('\n');
+    }
+    head.push_str(&body);
+    head
 }
 
 /// Identifiers used in `#if`/`#elif` expressions that are neither defined in the source nor keywords.
@@ -156,7 +212,10 @@ pub fn floatify_src(src: &str) -> String {
     }
     for line in src.lines() {
         let t = line.trim_start();
-        let intish = t.starts_with('#') || line.contains("int ") || line.contains("ivec") || line.contains("uint") || line.contains("switch") || line.contains("case ");
+        // `float n = int(x);` is an error in GLSL ES; WE meant an int (it is later used as a loop bound)
+        let fixed;
+        let line = { let tl = line.trim_start(); if tl.starts_with("float ") && tl.contains("= int(") && !tl.contains(',') { fixed = line.replacen("float ", "int ", 1); fixed.as_str() } else { line } };
+        let intish = t.starts_with('#') || has_word(line, "int") || line.contains("ivec") || line.contains("uint") || line.contains("switch") || line.contains("case ");
         if intish { out.push_str(line); out.push('\n'); continue; }
         let b = line.as_bytes();
         let mut i = 0;
@@ -232,4 +291,14 @@ mod tests {
         assert_eq!(floatify_src("float b = 2 * x + v[1] - smoothstep(0, 1.5, y);\nint k = 3;\n"), "float b = 2.0 * x + v[1] - smoothstep(0.0, 1.5, y);\nint k = 3;\n");
         assert!(translate(&fs, "effects/none", &Map::new(), &[], false).is_err());
     }
+}
+
+fn has_word(line: &str, w: &str) -> bool {
+    let b = line.as_bytes();
+    line.match_indices(w).any(|(i, _)| {
+        let before = i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_');
+        let j = i + w.len();
+        let after = j >= b.len() || !(b[j].is_ascii_alphanumeric() || b[j] == b'_');
+        before && after
+    })
 }
