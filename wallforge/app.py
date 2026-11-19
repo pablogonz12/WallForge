@@ -603,7 +603,7 @@ class Window(Adw.ApplicationWindow):
         q = self.w_search.get_text().strip()
         exclude = []
         if not self.cfg.data["show_anime"]:
-            exclude.append("Anime")
+            exclude += ["Anime", "Girls"]
         if self.cfg.data["safe_content"]:
             exclude += workshop.MATURE_TAGS
         if not self.cfg.data["ultrawide_on_16_9"] and not self._has_ultrawide_monitor():
