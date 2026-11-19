@@ -88,13 +88,13 @@ struct Pass {
 
 struct Layer {
     name: String, tex: u32, size: [f32; 2], world: Mat4, color: [f32; 3], alpha: f32, blend: Blend,
-    uvs: [f32; 2], passes: Vec<Pass>, ping: Option<(Target, Target)>, named: HashMap<String, Target>, px: (i32, i32),
+    uvs: [f32; 2], full: bool, passes: Vec<Pass>, ping: Option<(Target, Target)>, named: HashMap<String, Target>, px: (i32, i32),
 }
 
 pub struct Engine {
     layers: Vec<Layer>, prog: u32, u_mvp: i32, u_size: i32, u_tint: i32, u_flip: i32, u_uvs: i32,
     vao: u32, view: Mat4, pub clear: [f32; 3], scene_wh: (f32, f32),
-    pub animated: bool, pub vram: usize, pub notes: Vec<String>,
+    pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>,
     out: (i32, i32), scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
     t0: std::time::Instant, time_override: Option<f32>,
 }
@@ -135,7 +135,7 @@ impl Engine {
             gl::Disable(gl::DEPTH_TEST); gl::Disable(gl::DITHER); gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
         }
         let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"),
-            vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![],
+            vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None,
             out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None };
         e.rebuild();
         Ok(e)
@@ -149,7 +149,7 @@ impl Engine {
 
     /// (Re)build all GPU resources for the current output size (texture mips / FBO sizes depend on it).
     fn rebuild(&mut self) {
-        self.layers.clear(); self.vram = 0; self.animated = false;
+        self.layers.clear(); self.vram = 0; self.animated = false; self.scene_rt = None;
         let (v, sx, sy) = view_matrix(self.scene_wh.0, self.scene_wh.1, self.out.0, self.out.1, self.scaling);
         self.view = v;
         let s3tc = tex::has_s3tc();
@@ -163,15 +163,21 @@ impl Engine {
             };
             let Some(def) = scene::load_image(&self.vfs, &model) else { self.note(format!("layer '{name}': model/material '{model}' not found, skipped")); continue };
             let Some(tp) = def.tex_path.clone() else { self.note(format!("layer '{name}': no texture, skipped")); continue };
+            let full = tp.ends_with("_rt_FullFrameBuffer.tex");
+            let (size, px, gt) = if full {
+                ([self.scene_wh.0, self.scene_wh.1], self.out, GlTex { id: 0, w: 0, h: 0, bytes: 0, compressed: false, flags: 0, src: (0, 0), uv: [1.0, 1.0] })
+            } else {
             let Some(bytes) = self.vfs.read(&tp) else { self.note(format!("layer '{name}': texture {tp} not found, skipped")); continue };
             let t = match tex::parse(&bytes, false) { Ok(t) => t, Err(e) => { self.note(format!("layer '{name}': {e}, skipped")); continue } };
             let meta = self.vfs.read_json(&tp.replace(".tex", ".tex-json")).map(|j| tex::parse_meta(&j)).unwrap_or_default();
             let size = size_o.or(def.size_hint).unwrap_or([t.img_w as f32, t.img_h as f32]);
             let px = ((size[0] * scale[0].abs() * sx).ceil().max(1.0) as i32, (size[1] * scale[1].abs() * sy).ceil().max(1.0) as i32);
             let gt = match tex::upload(&t, px.0 as u32, px.1 as u32, &meta, s3tc) { Ok(g) => g, Err(e) => { self.note(format!("layer '{name}': {e}, skipped")); continue } };
+            (size, px, gt)
+            };
             self.vram += gt.bytes;
             let world = world_of(&self.scene.objects, i, 0);
-            let mut layer = Layer { name: name.clone(), tex: gt.id, size, world, color, alpha, uvs: gt.uv, blend: blend_of(blend_o.as_deref().unwrap_or(&def.material.blending)),
+            let mut layer = Layer { name: name.clone(), tex: gt.id, size, world, color, alpha, uvs: gt.uv, full, blend: blend_of(blend_o.as_deref().unwrap_or(&def.material.blending)),
                 passes: vec![], ping: None, named: HashMap::new(), px };
             if def.material.blending == "additive" { layer.blend = Blend::Additive; }
             // effects
@@ -205,6 +211,10 @@ impl Engine {
                 }
             }
             self.layers.push(layer);
+        }
+        if self.layers.iter().any(|l| l.full) {
+            let rt = Target::new(self.out.0.max(1), self.out.1.max(1));
+            self.vram += rt.bytes(); self.scene_rt = Some(rt);
         }
         for (_, t) in cache { if let Some(t) = t { self.vram += t.bytes; } }
         eprintln!("wallforge-render: scene {}x{} -> {}x{}: {} layers, {} with effects, texture+fbo memory {:.1} MiB, animated={}",
@@ -320,25 +330,30 @@ impl Engine {
 
     pub fn draw(&mut self) {
         let t = self.time_override.unwrap_or_else(|| self.t0.elapsed().as_secs_f32());
+        let rt_fbo = self.scene_rt.as_ref().map(|r| r.fbo).unwrap_or(0);
         unsafe {
-            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+            gl::BindFramebuffer(gl::FRAMEBUFFER, rt_fbo);
             gl::Viewport(0, 0, self.out.0, self.out.1);
             gl::ClearColor(self.clear[0], self.clear[1], self.clear[2], 1.0);
             gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::BindVertexArray(self.vao);
         }
         for li in 0..self.layers.len() {
-            let src_tex = self.render_effects(li, t);
+            let l = &self.layers[li];
+            if l.full && l.ping.is_none() { continue; }
+            let src_tex = if l.full { self.render_effects(li, t, self.scene_rt.as_ref().map(|r| r.tex)) } else { self.render_effects(li, t, None) };
             let l = &self.layers[li];
             let mvp = scene::mul(&self.view, &l.world);
+            let mvp = if l.full { scene::ident() } else { mvp };
+            let lsize = if l.full { [2.0, 2.0] } else { l.size };
             unsafe {
-                gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+                gl::BindFramebuffer(gl::FRAMEBUFFER, rt_fbo);
                 gl::Viewport(0, 0, self.out.0, self.out.1);
-                gl::Enable(gl::BLEND);
+                if l.full { gl::Disable(gl::BLEND); } else { gl::Enable(gl::BLEND); }
                 match l.blend { Blend::Alpha => gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA), Blend::Additive => gl::BlendFunc(gl::SRC_ALPHA, gl::ONE) }
                 gl::UseProgram(self.prog);
                 gl::UniformMatrix4fv(self.u_mvp, 1, gl::FALSE, mvp.as_ptr());
-                gl::Uniform2f(self.u_size, l.size[0], l.size[1]);
+                gl::Uniform2f(self.u_size, lsize[0], lsize[1]);
                 gl::Uniform4f(self.u_tint, l.color[0], l.color[1], l.color[2], l.alpha);
                 gl::Uniform1f(self.u_flip, 0.0);
                 if l.ping.is_some() { gl::Uniform2f(self.u_uvs, 1.0, 1.0); } else { gl::Uniform2f(self.u_uvs, l.uvs[0], l.uvs[1]); }
@@ -347,10 +362,24 @@ impl Engine {
                 gl::Disable(gl::BLEND);
             }
         }
+        if let Some(rt) = &self.scene_rt {
+            unsafe {
+                gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+                gl::Viewport(0, 0, self.out.0, self.out.1);
+                gl::Disable(gl::BLEND);
+                gl::UseProgram(self.prog);
+                gl::UniformMatrix4fv(self.u_mvp, 1, gl::FALSE, scene::ident().as_ptr());
+                gl::Uniform2f(self.u_size, 2.0, 2.0);
+                gl::Uniform4f(self.u_tint, 1.0, 1.0, 1.0, 1.0);
+                gl::Uniform1f(self.u_flip, 1.0); gl::Uniform2f(self.u_uvs, 1.0, 1.0);
+                gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, rt.tex);
+                gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
+            }
+        }
     }
 
     /// Runs the layer's effect chain; returns the texture holding the final image.
-    fn render_effects(&self, li: usize, t: f32) -> u32 {
+    fn render_effects(&self, li: usize, t: f32, src: Option<u32>) -> u32 {
         let l = &self.layers[li];
         let Some((a, b)) = &l.ping else { return l.tex };
         unsafe {
@@ -362,8 +391,8 @@ impl Engine {
             gl::UniformMatrix4fv(self.u_mvp, 1, gl::FALSE, scene::ident().as_ptr());
             gl::Uniform2f(self.u_size, 2.0, 2.0);
             gl::Uniform4f(self.u_tint, 1.0, 1.0, 1.0, 1.0);
-            gl::Uniform1f(self.u_flip, 1.0); gl::Uniform2f(self.u_uvs, l.uvs[0], l.uvs[1]);
-            gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, l.tex);
+            gl::Uniform1f(self.u_flip, if src.is_some() { 0.0 } else { 1.0 }); gl::Uniform2f(self.u_uvs, l.uvs[0], l.uvs[1]);
+            gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, src.unwrap_or(l.tex));
             gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
         }
         // the fullscreen effect quad: vertex positions are [-1,1] already, so the MVP is the identity
