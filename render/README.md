@@ -23,6 +23,25 @@ wallforge-render --output DP-2 --bg <wallpaper dir | video file> \
 - Fractional scale via wp-fractional-scale-v1 + wp-viewporter (buffer in physical pixels); integer scale fallback. If the compositor goes away the renderer prints a message and exits.
 - Only `video` projects are supported for now; other types exit with an error.
 
+## Scene wallpapers (Wallpaper Engine `"type": "scene"`)
+
+`--bg <dir>` with a scene `project.json` takes the scene path automatically (the video path is unchanged).
+Reads `scene.pkg` (PKGV) or loose files, falling back to the Wallpaper Engine assets dir
+(`--assets-dir DIR`; default: Steam `wallpaper_engine/assets`, else `~/.local/share/wallforge/assets`).
+
+Supported: image layers (transform, parenting, alpha, tint, translucent/normal/additive blending, draw order),
+`--scaling fill|fit|stretch`, clear colour, `--fps` cap, user properties (`--set-property key=value`, repeatable),
+.tex (RGBA8888, DXT1/3/5 kept compressed on the GPU, RG88, R8, embedded PNG/JPEG/GIF/BMP, LZ4), and multi-pass
+effects: the WE shader dialect is translated to GLSL ES 3.00 with ping-pong FBOs. Static scenes render once and then
+sleep; only effects using `g_Time` redraw every frame.
+
+Not yet (stage 2): particles, audio-reactive uniforms, sound objects, puppet animation, video layers.
+3D scenes (perspective camera / `.mdl`) print one line and exit with code 3. `--check` prints a JSON report
+(`supported`, `unsupported`, `stage2_pending`, `missing_files`); exit code 3 when unsupported.
+Known limit: ES 3.00 is strict about implicit int->float conversions the WE dialect allows; such an effect
+fails to compile and is skipped with a warning. Untested against real Wallpaper Engine content so far.
+`--make-test-scene DIR` writes a synthetic scene used for development.
+
 ## Build
 `cargo build --release` -> `target/release/wallforge-render`
 Needs ffmpeg dev libs (libav*), libEGL, libwayland-client, libva (runtime). No protocol XML needed (bundled in crates).
