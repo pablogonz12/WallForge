@@ -77,7 +77,24 @@ vec2 wf_mix(vec2 a, vec2 b, float t) { return mix(a, b, t); }
 vec3 wf_mix(vec3 a, vec3 b, float t) { return mix(a, b, t); }
 vec4 wf_mix(vec4 a, vec4 b, float t) { return mix(a, b, t); }
 vec3 wf_mix(vec4 a, vec3 b, float t) { return mix(a.rgb, b, t); }
+vec2 wf_mix(vec2 a, vec2 b, vec3 t) { return mix(a, b, t.xy); }
+vec2 wf_mix(vec2 a, vec2 b, vec4 t) { return mix(a, b, t.xy); }
+vec3 wf_mix(vec3 a, vec3 b, vec4 t) { return mix(a, b, t.xyz); }
+vec3 wf_mix(vec3 a, vec4 b, float t) { return mix(a, b.rgb, t); }
+vec3 wf_mix(vec3 a, vec4 b, vec3 t) { return mix(a, b.rgb, t); }
 #define mix wf_mix
+float wf_mod(float a, float b) { return a - b * trunc(a / b); }
+vec2 wf_mod(vec2 a, vec2 b) { return a - b * trunc(a / b); }
+vec3 wf_mod(vec3 a, vec3 b) { return a - b * trunc(a / b); }
+vec4 wf_mod(vec4 a, vec4 b) { return a - b * trunc(a / b); }
+vec2 wf_mod(vec2 a, float b) { return a - b * trunc(a / b); }
+vec3 wf_mod(vec3 a, float b) { return a - b * trunc(a / b); }
+vec4 wf_mod(vec4 a, float b) { return a - b * trunc(a / b); }
+float wf_mod(float a, int b) { return wf_mod(a, float(b)); }
+float wf_mod(float a, uint b) { return wf_mod(a, float(b)); }
+float wf_mod(int a, float b) { return wf_mod(float(a), b); }
+int wf_mod(int a, int b) { return a % b; }
+uint wf_mod(uint a, uint b) { return a % b; }
 vec4 wf_tex(sampler2D s, vec2 c) { return texture(s, c); }
 vec4 wf_tex(sampler2D s, vec4 c) { return texture(s, c.xy); }
 ";
@@ -261,6 +278,182 @@ pub fn translate(read: &dyn Fn(&str) -> Option<String>, shader: &str, combo_over
     Ok(Translated { vert, frag, uniforms, uses_time, combos })
 }
 
+fn ty_dim(t: &str) -> Option<usize> { Some(match t { "float" | "int" | "uint" | "bool" => 1, "vec2" | "ivec2" | "uvec2" => 2, "vec3" | "ivec3" | "uvec3" => 3, "vec4" | "ivec4" | "uvec4" => 4, _ => return None }) }
+fn is_id(c: u8) -> bool { c.is_ascii_alphanumeric() || c == b'_' }
+
+/// Index just past the bracket group opening at `i` (`(` or `[`), or None when unbalanced.
+fn match_close(b: &[u8], i: usize) -> Option<usize> {
+    let mut d = 0i32;
+    for j in i..b.len() { match b[j] { b'(' | b'[' => d += 1, b')' | b']' => { d -= 1; if d == 0 { return Some(j + 1); } } _ => {} } }
+    None
+}
+/// Start index of the operand ending just before `end` (identifier/number chain with calls, indexing and swizzles).
+fn operand_start(b: &[u8], end: usize) -> usize {
+    let mut i = end;
+    while i > 0 && b[i - 1] == b' ' { i -= 1; }
+    while i > 0 {
+        let c = b[i - 1];
+        if c == b')' || c == b']' {
+            let mut d = 0i32; let mut j = i;
+            while j > 0 { j -= 1; match b[j] { b')' | b']' => d += 1, b'(' | b'[' => { d -= 1; if d == 0 { break; } } _ => {} } }
+            i = j;
+        } else if is_id(c) || c == b'.' { while i > 0 && (is_id(b[i - 1]) || b[i - 1] == b'.') { i -= 1; } } else { break; }
+        if i > 0 && (b[i - 1] == b')' || b[i - 1] == b']' || is_id(b[i - 1]) || b[i - 1] == b'.') { continue; }
+        break;
+    }
+    i
+}
+/// HLSL `%` is fmod on floats; GLSL only allows ints. `a * b % c` -> `wf_mod(a * b, c)` (the multiplicative chain is the left operand).
+fn fix_mod(line: &str) -> String {
+    let mut s = line.to_string();
+    loop {
+        let b = s.as_bytes();
+        let code = s.find("//").unwrap_or(s.len());
+        let Some(p) = (0..code).rev().find(|&p| b[p] == b'%' && b.get(p + 1) != Some(&b'=')) else { return s };
+        let mut st = operand_start(b, p);
+        loop {
+            let mut k = st; while k > 0 && b[k - 1] == b' ' { k -= 1; }
+            if k > 0 && (b[k - 1] == b'*' || b[k - 1] == b'/') { st = operand_start(b, k - 1); } else { break; }
+        }
+        let mut r = p + 1; while r < b.len() && b[r] == b' ' { r += 1; }
+        let r0 = r; if r < b.len() && (b[r] == b'-' || b[r] == b'+') { r += 1; }
+        while r < b.len() && (is_id(b[r]) || b[r] == b'.') { r += 1; }
+        while r < b.len() && (b[r] == b'(' || b[r] == b'[') { match match_close(b, r) { Some(e) => r = e, None => return s } while r < b.len() && (is_id(b[r]) || b[r] == b'.') { r += 1; } }
+        if r == r0 { return s; }
+        s = format!("{}wf_mod({}, {}){}", &s[..st], s[st..p].trim(), s[r0..r].trim(), &s[r..]);
+        // the rewritten call hides its own `%`-free text; continue with any earlier `%`
+        if !s[..st].contains('%') { return s; }
+    }
+}
+/// `a[f]` -> `a[int(f)]` (HLSL allows float indices).
+fn fix_index(line: &str) -> String {
+    let b = line.as_bytes();
+    let (mut out, mut i) = (String::new(), 0);
+    let code = line.find("//").unwrap_or(line.len());
+    while i < b.len() {
+        if b[i] == b'[' && i < code && i > 0 && (is_id(b[i - 1]) || b[i - 1] == b']') {
+            if let Some(e) = match_close(b, i) {
+                let inner = &line[i + 1..e - 1];
+                if inner.bytes().all(|c| c.is_ascii_digit()) || inner.is_empty() { out.push_str(&line[i..e]); } else { out.push_str(&format!("[int({})]", inner)); }
+                i = e; continue;
+            }
+        }
+        out.push(b[i] as char); i += 1;
+    }
+    out
+}
+/// Wraps the right-hand side of the first assignment/initializer on the line in `to(..)` (HLSL converts and truncates implicitly).
+fn fix_assign(line: &str, from: &str, to: &str) -> String {
+    let b = line.as_bytes();
+    let code = line.find("//").unwrap_or(line.len());
+    let Some(p) = (0..code).find(|&p| b[p] == b'=' && b.get(p + 1) != Some(&b'=') && (p == 0 || !matches!(b[p - 1], b'=' | b'<' | b'>' | b'!'))) else { return line.to_string() };
+    let s = p + 1;
+    let (mut d, mut e) = (0i32, code);
+    for j in s..code { match b[j] { b'(' | b'[' => d += 1, b')' | b']' => { if d == 0 { e = j; break; } d -= 1; } b';' | b',' if d == 0 => { e = j; break; } _ => {} } }
+    let rhs = line[s..e].trim();
+    let (fd, td) = (ty_dim(from).unwrap_or(1), ty_dim(to).unwrap_or(1));
+    let w = if td > fd && fd > 1 { format!("{to}({rhs}{})", ", 0.0".repeat(td - fd)) } else { format!("{to}({rhs})") };
+    format!("{} {}{}", &line[..s], w, &line[e..])
+}
+/// Wraps integer-typed symbols (`int` variables, `const int`, integer `#define`s) on the line in `float(..)` (HLSL mixes int and float freely).
+fn fix_float(line: &str, ints: &[String]) -> String {
+    // `intVar *= floatExpr;` -> HLSL truncates the right-hand side
+    let t = line.trim_start();
+    let id_end = t.bytes().position(|c| !is_id(c)).unwrap_or(0);
+    if id_end > 0 && ints.iter().any(|n| n == &t[..id_end]) && ["+=", "-=", "*=", "/="].iter().any(|o| t[id_end..].trim_start().starts_with(o)) { return fix_assign(line, "float", "int"); }
+    let b = line.as_bytes();
+    let code = line.find("//").unwrap_or(line.len());
+    let (mut out, mut i, mut br) = (String::new(), 0, 0i32);
+    while i < b.len() {
+        let c = b[i];
+        if i >= code { out.push(c as char); i += 1; continue; }
+        if c == b'[' { br += 1; } else if c == b']' { br -= 1; }
+        if c.is_ascii_alphabetic() || c == b'_' {
+            let st = i; while i < b.len() && is_id(b[i]) { i += 1; }
+            let id = &line[st..i];
+            let after = line[i..].trim_start();
+            let before = line[..st].trim_end();
+            let decl = ["int", "uint", "const", "float"].iter().any(|t| before.ends_with(t) && before[..before.len() - t.len()].bytes().last().map_or(true, |c| !is_id(c)));
+            let assigned = after.starts_with("++") || after.starts_with("--") || (after.starts_with('=') && !after.starts_with("==")) || ["+=", "-=", "*=", "/="].iter().any(|o| after.starts_with(o));
+            if br == 0 && !(st > 0 && b[st - 1] == b'.') && !decl && !assigned && !after.starts_with('(') && (after.starts_with(|c| "+-*/<>".contains(c)) || before.ends_with(|c| "+-*/<>".contains(c))) && !(before.ends_with("float(") && after.starts_with(')')) && ints.iter().any(|n| n == id) { out.push_str(&format!("float({id})")); } else { out.push_str(id); }
+        } else if c.is_ascii_digit() {
+            let st = i; while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'.') { i += 1; }
+            let tok = &line[st..i];
+            if br == 0 && tok.bytes().all(|d| d.is_ascii_digit()) && !(st > 0 && b[st - 1] == b'.') { out.push_str(tok); out.push_str(".0"); } else { out.push_str(tok); }
+        } else { out.push(c as char); i += 1; }
+    }
+    out
+}
+fn int_symbols(src: &str) -> Vec<String> {
+    let mut v: Vec<String> = vec![];
+    for l in src.lines() {
+        let t = l.trim_start();
+        if let Some(r) = t.strip_prefix("#define ") {
+            let mut it = r.split_whitespace();
+            if let (Some(n), Some(val)) = (it.next(), it.next()) { if !val.is_empty() && val.bytes().all(|c| c.is_ascii_digit()) { v.push(n.to_string()); } }
+            continue;
+        }
+        let t = t.strip_prefix("const ").unwrap_or(t).trim_start().strip_prefix("for (").or_else(|| t.strip_prefix("for(")).unwrap_or(t.strip_prefix("const ").unwrap_or(t));
+        if let Some(r) = t.strip_prefix("int ").or_else(|| t.strip_prefix("uint ")) { if let Some(n) = r.split(|c: char| !is_id(c as u8)).next() { if !n.is_empty() { v.push(n.to_string()); } } }
+    }
+    v
+}
+fn set_varying(src: &str, name: &str, ty: &str) -> String {
+    let mut o = String::new();
+    for l in src.lines() {
+        let t = l.trim_start();
+        if t.starts_with("varying ") && has_word(t, name) && !t.contains(',') {
+            let mut it = t.split_whitespace(); it.next();
+            if let Some(old) = it.next() { o.push_str(&l.replacen(old, ty, 1)); o.push('\n'); continue; }
+        }
+        o.push_str(l); o.push('\n');
+    }
+    o
+}
+fn between<'a>(s: &'a str, a: &str, b: &str) -> Option<&'a str> { let i = s.find(a)? + a.len(); let j = s[i..].find(b)?; Some(&s[i..i + j]) }
+
+/// Patches a shader that failed to compile/link, driven by the GL info log: HLSL-style implicit conversions (int/float mixing,
+/// vecN truncation on init/assign, float array indices, float `%`) and mismatched varying widths between stages.
+/// Returns false when the log held nothing it knows how to fix.
+pub fn repair(tr: &mut Translated, err: &str) -> bool {
+    let mut changed = false;
+    if let Some(l) = err.lines().find(|l| l.contains("shader output `") && l.contains("declared as type")) {
+        if let (Some(n), Some(t1), Some(t2)) = (between(l, "output `", "'"), between(l, "declared as type `", "'"), l.rsplit("declared as type `").next().and_then(|r| r.split('\'').next())) {
+            let ty = if ty_dim(t1) >= ty_dim(t2) { t1 } else { t2 };
+            let (v, f) = (set_varying(&tr.vert, n, ty), set_varying(&tr.frag, n, ty));
+            if v != tr.vert || f != tr.frag { tr.vert = v; tr.frag = f; changed = true; }
+        }
+    }
+    let is_frag = err.starts_with("fragment:");
+    if !(err.starts_with("fragment:") || err.starts_with("vertex:")) { return changed; }
+    let src = if is_frag { &tr.frag } else { &tr.vert };
+    let ints = int_symbols(src);
+    let mut lines: Vec<String> = src.lines().map(String::from).collect();
+    let mut done: Vec<(usize, &str)> = vec![];
+    for l in err.lines() {
+        let l = l.strip_prefix("fragment:").or_else(|| l.strip_prefix("vertex:")).unwrap_or(l).trim_start();
+        let Some(r) = l.strip_prefix("0:") else { continue };
+        let Some((n, rest)) = r.split_once('(') else { continue };
+        let Ok(n) = n.parse::<usize>() else { continue };
+        let Some(msg) = rest.split_once("error: ").map(|x| x.1) else { continue };
+        if n == 0 || n > lines.len() { continue; }
+        let kind = if msg.contains("cannot be assigned to variable of type") { "assign" } else if msg.contains("array index must be integer") { "index" }
+            else if msg.contains("must be an integer") && lines[n - 1].contains('%') { "mod" }
+            else if msg.contains("could not implicitly convert operands") || msg.contains("must be numeric") { "float" } else { continue };
+        if done.contains(&(n, kind)) { continue; }
+        done.push((n, kind));
+        let cur = lines[n - 1].clone();
+        let new = match kind {
+            "assign" => match (between(msg, "type ", " cannot"), msg.rsplit("variable of type ").next()) { (Some(f), Some(t)) if ty_dim(f).is_some() && ty_dim(t.trim()).is_some() => fix_assign(&cur, f, t.trim()), _ => cur.clone() },
+            "index" => fix_index(&cur), "mod" => fix_mod(&cur), _ => fix_float(&cur, &ints),
+        };
+        if new != cur { lines[n - 1] = new; changed = true; }
+    }
+    let mut out = lines.join("\n"); out.push('\n');
+    if is_frag { tr.frag = out; } else { tr.vert = out; }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,6 +464,32 @@ mod tests {
             "shaders/effects/test.frag" => "// [COMBO] {\"material\":\"ui_editor_properties_mode\",\"combo\":\"MODE\",\"type\":\"options\",\"default\":1}\n#include \"common.h\"\nvarying vec2 v_TexCoord;\nuniform sampler2D g_Texture0; // {\"material\":\"framebuffer\",\"label\":\"ui_editor_properties_framebuffer\",\"hidden\":true}\nuniform float g_Time;\nuniform float u_amount; // {\"material\":\"amount\",\"default\":0.5,\"range\":[0,1]}\nvoid main() { vec4 c = texSample2D(g_Texture0, v_TexCoord);\n#if MODE == 1\n c.rgb = mix(c.rgb, gray(c.rgb), saturate(u_amount));\n#endif\n gl_FragColor = c; }\n",
             _ => return None,
         }.to_string())
+    }
+    fn tr(vert: &str, frag: &str) -> Translated { Translated { vert: vert.into(), frag: frag.into(), uniforms: vec![], uses_time: false, combos: BTreeMap::new() } }
+    #[test]
+    fn repairs_hlsl_conversions() {
+        // float %, scalar chain on the left
+        assert_eq!(fix_mod("float d = abs((x.x * n % 1.0) * 2.0);"), "float d = abs((wf_mod(x.x * n, 1.0)) * 2.0);");
+        // float array index
+        assert_eq!(fix_index("a = s[g_C] + t[2];"), "a = s[int(g_C)] + t[2];");
+        // truncation / narrowing / widening on init
+        assert_eq!(fix_assign("\tvec2 c = v_TexCoord;", "vec4", "vec2"), "\tvec2 c = vec2(v_TexCoord);");
+        assert_eq!(fix_assign("float p = a * b;", "vec2", "float"), "float p = float(a * b);");
+        assert_eq!(fix_assign("for (int i = u_Min; i < 3; i++) {", "float", "int"), "for (int i = int(u_Min); i < 3; i++) {");
+        assert_eq!(fix_assign("vec4 c = v;", "vec2", "vec4"), "vec4 c = vec4(v, 0.0, 0.0);");
+        // int symbols in float arithmetic, not as call args
+        assert_eq!(fix_float("x = f / N * g(N);", &["N".to_string()]), "x = f / float(N) * g(N);");
+        // driven by the info log
+        let mut t = tr("", "void main() {\n\tvec3 c = vec4(1.0);\n\tfloat f = v[g];\n}\n");
+        assert!(repair(&mut t, "fragment: 0:2(2): error: initializer of type vec4 cannot be assigned to variable of type vec3\n0:3(14): error: array index must be integer type"));
+        assert!(t.frag.contains("vec3 c = vec3(vec4(1.0));") && t.frag.contains("v[int(g)]"));
+        // varying width mismatch widens both stages
+        let mut t = tr("varying vec4 v_T;\n", "varying vec2 v_T;\n");
+        assert!(repair(&mut t, "link: error: vertex shader output `v_T' declared as type `vec4', but fragment shader input declared as type `vec2'"));
+        assert_eq!((t.vert.as_str(), t.frag.as_str()), ("varying vec4 v_T;\n", "varying vec4 v_T;\n"));
+        assert!(!repair(&mut t, "fragment: 0:1(1): error: something else"));
+        // prelude carries the mismatched mix / float mod overloads
+        assert!(PRE.contains("vec3 wf_mix(vec3 a, vec3 b, vec4 t)") && PRE.contains("float wf_mod(float a, float b)"));
     }
     #[test]
     fn translates_sample() {

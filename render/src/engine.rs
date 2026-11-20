@@ -29,8 +29,8 @@ fn compile(kind: u32, src: &str) -> Result<u32, String> {
         gl::CompileShader(s);
         let mut ok = 0; gl::GetShaderiv(s, gl::COMPILE_STATUS, &mut ok);
         if ok == 0 {
-            let mut buf = [0u8; 2048]; let mut n = 0;
-            gl::GetShaderInfoLog(s, 2048, &mut n, buf.as_mut_ptr() as *mut _);
+            let mut buf = [0u8; 8192]; let mut n = 0;
+            gl::GetShaderInfoLog(s, 8192, &mut n, buf.as_mut_ptr() as *mut _);
             gl::DeleteShader(s);
             return Err(String::from_utf8_lossy(&buf[..n as usize]).trim().to_string());
         }
@@ -284,7 +284,11 @@ impl Engine {
             Err(e1) => {
                 let vfs = &self.vfs;
                 match shader::translate(&|n| vfs.read_str(n), &mat.shader, &combos, &present, true) {
-                    Ok(t2) => { if std::env::var("WF_DBG").is_ok() { eprintln!("retry frag has float(: {}", t2.frag.contains("float(sampleCount)")); } match link(&t2.vert, &t2.frag) { Ok(p) => Ok((p, Some(t2))), Err(e2) => Err((e2, Some(t2))) } },
+                    Ok(mut t2) => { if std::env::var("WF_DBG").is_ok() { eprintln!("retry frag has float(: {}", t2.frag.contains("float(sampleCount)")); }
+                        // HLSL-style implicit conversions: patch the source from the info log and relink
+                        let mut r = link(&t2.vert, &t2.frag);
+                        for _ in 0..12 { match &r { Err(e) if shader::repair(&mut t2, e) => r = link(&t2.vert, &t2.frag), _ => break } }
+                        match r { Ok(p) => Ok((p, Some(t2))), Err(e2) => Err((e2, Some(t2))) } },
                     Err(e) => { eprintln!("wallforge-render: floatify retry translate failed: {e}"); Err((e1, None)) }
                 }
             }
@@ -310,6 +314,10 @@ impl Engine {
         let mut names: Vec<Option<String>> = mat.textures.clone();
         for (i, t) in ep.textures.iter().enumerate() { if names.len() <= i { names.resize(i + 1, None); } if t.is_some() { names[i] = t.clone(); } }
         if let Some((_, ts, _)) = ov { for (i, t) in ts.iter().enumerate() { if names.len() <= i { names.resize(i + 1, None); } if t.is_some() { names[i] = t.clone(); } } }
+        // sampler annotation `"default": "pattern/x"` supplies the texture when nothing is bound to the slot
+        for u in &tr.uniforms { if let (Some(i), Some(d)) = (u.name.strip_prefix("g_Texture").and_then(|n| n.parse::<usize>().ok()), u.default.as_ref().and_then(|d| d.as_str())) {
+            if i > 0 && u.ty == "sampler2D" && !d.is_empty() { if names.len() <= i { names.resize(i + 1, None); } if names[i].is_none() { names[i] = Some(d.to_string()); } }
+        } }
         let mut textures = vec![]; let mut binds = vec![(0usize, "previous".to_string())];
         for (i, n) in names.iter().enumerate() {
             let bound = ep.bind.iter().find(|b| b.1 == i).map(|b| b.0.clone());
