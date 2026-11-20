@@ -230,6 +230,7 @@ clipboard in one click. [docs/troubleshooting.md](docs/troubleshooting.md) cover
 
 ## More documentation
 
+- [docs/comparison.md](docs/comparison.md): WallForge next to other ways of playing Wallpaper Engine content
 - [docs/compatibility.md](docs/compatibility.md): which Wallpaper Engine features are supported
 - [docs/wallpaper-engine-import.md](docs/wallpaper-engine-import.md): exactly what the import reads
 - [docs/troubleshooting.md](docs/troubleshooting.md): setup problems, logs, known limits
