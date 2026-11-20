@@ -13,7 +13,7 @@ use wayland_client::protocol::{wl_compositor, wl_output};
 use wayland_client::{Connection, Proxy};
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1;
 use wayland_protocols::wp::viewporter::client::wp_viewporter;
-use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1;
 
 /// Is `bg` a directory whose project.json says type "scene"?
 pub fn is_scene(bg: &Path) -> bool {
@@ -68,37 +68,28 @@ pub fn run(args: Args) {
     let conn = Connection::connect_to_env().unwrap_or_else(|e| { eprintln!("wayland connect: {e}"); std::process::exit(1) });
     let (globals, mut queue) = registry_queue_init::<App>(&conn).expect("registry");
     let qh = queue.handle();
-    let mut app = App { outputs: vec![], configured: false, closed: false, size: (0, 0), resized: false, cb_ready: true, ready_file, frac: 0 };
+    let mut app = App { outputs: vec![], configured: false, closed: false, size: (0, 0), resized: false, cb_ready: true, ready_file, fb: (0, 0), pend: (0, 0), frac: 0 };
     let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=6, ()).expect("wl_compositor");
-    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = match globals.bind(&qh, 1..=4, ()) {
-        Ok(s) => s,
-        Err(_) => {
-            eprintln!("wallforge-render: this compositor does not implement wlr-layer-shell, so a wallpaper cannot be placed behind your windows.");
-            std::process::exit(2);
-        }
-    };
+    let shell = crate::bind_shell(&globals, &qh, args.window);
     let outs: Vec<(u32, u32)> = globals.contents().with_list(|l| l.iter().filter(|g| g.interface == "wl_output").map(|g| (g.name, g.version)).collect());
     for (name, ver) in outs {
         let o = globals.registry().bind::<wl_output::WlOutput, _, _>(name, ver.min(4), &qh, ());
-        app.outputs.push((o, None, 1));
+        app.outputs.push((o, None, 1, (0, 0)));
     }
     queue.roundtrip(&mut app).unwrap();
     queue.roundtrip(&mut app).unwrap();
-    let Some((out, _, scale)) = app.outputs.iter().find(|o| o.1.as_deref() == Some(args.output.as_str())).cloned() else {
+    let Some((out, _, scale, mode)) = app.outputs.iter().find(|o| o.1.as_deref() == Some(args.output.as_str())).cloned() else {
         let names: Vec<_> = app.outputs.iter().filter_map(|o| o.1.clone()).collect();
         eprintln!("wallforge-render: output {} not found (have: {})", args.output, names.join(", "));
         std::process::exit(1)
     };
 
+    app.fb = (mode.0 / scale.max(1), mode.1 / scale.max(1));
     let surface = compositor.create_surface(&qh, ());
     let empty = compositor.create_region(&qh, ());
     surface.set_input_region(Some(&empty));
     empty.destroy();
-    let layer = shell.get_layer_surface(&surface, Some(&out), args.layer, "wallforge".into(), &qh, ());
-    layer.set_anchor(zwlr_layer_surface_v1::Anchor::Top | zwlr_layer_surface_v1::Anchor::Bottom | zwlr_layer_surface_v1::Anchor::Left | zwlr_layer_surface_v1::Anchor::Right);
-    layer.set_exclusive_zone(-1);
-    layer.set_size(0, 0);
-    layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
+    let layer = shell.attach(&qh, &surface, &out, &args);
     let vpr: Option<wp_viewporter::WpViewporter> = globals.bind(&qh, 1..=1, ()).ok();
     let fsm: Option<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
     let viewport = vpr.as_ref().map(|v| v.get_viewport(&surface, &qh, ()));

@@ -5,7 +5,7 @@ and **scene** wallpapers. WallForge starts one process per output; it can also b
 
 ```
 wallforge-render --output DP-2 --bg <wallpaper dir | video file> \
-  [--scaling fill|fit|stretch] [--fps 30] [--layer background|bottom|top|overlay] \
+  [--scaling fill|fit|stretch] [--fps 30] [--layer background|bottom|top|overlay] [--window] \
   [--silent] [--volume N] [--duration SECS] [--software] \
   [--assets-dir DIR] [--set-property key=value]... [--disable-particles] [--scale 100]      (scenes)
 wallforge-render --check <wallpaper dir | video file>                           (JSON report, no window)
