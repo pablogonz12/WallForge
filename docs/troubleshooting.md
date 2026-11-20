@@ -63,7 +63,9 @@ Volume is the global volume (Settings > Playback) scaled by the wallpaper's own 
 Sound from scene wallpapers is not played yet; video and web wallpapers have sound.
 
 **The wallpaper pauses when a window is fullscreen.**
-That is the default. Change it in Settings > Effects and power.
+WallForge's renderer stops drawing whenever the compositor says the wallpaper is not visible, to save power; it
+resumes where it stopped. The "Keep playing under fullscreen apps" switch only applies to the optional
+`linux-wallpaperengine` fallback.
 
 **Wallpapers are gone after logging in.**
 Turn on Settings > Desktop > Restore wallpapers at login. If your compositor ignores XDG autostart entries, run

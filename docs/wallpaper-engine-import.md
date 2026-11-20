@@ -32,7 +32,7 @@ was active and it is installed here, **Import and set wallpaper** also applies i
 | A wallpaper's customised properties (`wproperties`, or `wallpaperproperties` in older files) | The same properties in the wallpaper's panel. Supported types: switch, slider, colour, combo, text. |
 | A wallpaper's `volume` | Volume in the wallpaper's panel (scaled by the global volume) |
 | `fps` | Settings > Playback > Frame rate limit |
-| `playbackfullscreen` (run / pause / stop) | Settings > Effects and power > Keep playing under fullscreen apps |
+| `playbackfullscreen` (run / pause / stop) | Settings > Effects and power > Keep playing under fullscreen apps. This switch only affects the optional `linux-wallpaperengine` fallback; WallForge's own renderer always stops drawing while it is covered. |
 | The selected wallpaper per monitor | Offered as "Import and set wallpaper" |
 
 Wallpapers are matched by their Workshop id, which is part of the path Wallpaper Engine stores, so drive letters and

@@ -110,7 +110,7 @@ your Windows drive with **Choose file**. You see what would change before anythi
 | Each wallpaper's customised properties (colours, sliders, switches, combos, text) | Playlists |
 | Each wallpaper's volume | Per-wallpaper alignment, playback speed and colour adjustments |
 | Frame rate limit | Image and file properties (they point at Windows paths) |
-| Whether to pause under fullscreen apps | Settings of wallpapers that are not installed here |
+| The fullscreen pause rule | Settings of wallpapers that are not installed here |
 | Optionally, the wallpaper that was active | |
 
 From a terminal: `./wallforge.sh --import-we [path/to/config.json] [--dry-run]`.
