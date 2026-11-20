@@ -104,7 +104,7 @@ impl Vfs {
     pub fn read_str(&self, name: &str) -> Option<String> { self.read(name).map(|d| String::from_utf8_lossy(&d).into_owned()) }
     pub fn read_json(&self, name: &str) -> Option<serde_json::Value> {
         let s = self.read_str(name)?;
-        serde_json::from_str(s.trim_start_matches('\u{feff}')).ok()
+        parse_json(&s)
     }
     pub fn exists(&self, name: &str) -> bool {
         self.pkg.as_ref().map_or(false, |p| p.get(name).is_some()) || self.read(name).is_some()
@@ -141,5 +141,67 @@ mod tests {
         d.truncate(d.len() - 4);
         assert!(Pkg::parse(d).is_err());
         assert!(Pkg::parse(vec![4, 0, 0, 0, b'X', b'X', b'X', b'X', 0, 0, 0, 0]).is_err());
+    }
+}
+
+/// Wallpaper Engine's own JSON writer leaves trailing commas (and sometimes comments) in its files;
+/// `serde_json` rejects both, which used to make whole effect chains look missing.
+pub fn parse_json(text: &str) -> Option<serde_json::Value> {
+    let text = text.trim_start_matches('\u{feff}');
+    if let Ok(v) = serde_json::from_str(text) { return Some(v); }
+    let cleaned = strip_json_noise(text);
+    serde_json::from_str(&cleaned).ok()
+}
+
+fn strip_json_noise(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let bytes: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    let (mut in_str, mut escaped) = (false, false);
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            out.push(c);
+            if escaped { escaped = false } else if c == '\\' { escaped = true } else if c == '"' { in_str = false }
+            i += 1;
+            continue;
+        }
+        if c == '"' { in_str = true; out.push(c); i += 1; continue }
+        if c == '/' && i + 1 < bytes.len() && bytes[i + 1] == '/' {
+            while i < bytes.len() && bytes[i] != '\n' { i += 1 }
+            continue;
+        }
+        if c == '/' && i + 1 < bytes.len() && bytes[i + 1] == '*' {
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == '*' && bytes[i + 1] == '/') { i += 1 }
+            i = (i + 2).min(bytes.len());
+            continue;
+        }
+        if c == ',' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_whitespace() { j += 1 }
+            if j < bytes.len() && (bytes[j] == '}' || bytes[j] == ']') { i += 1; continue }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+    #[test]
+    fn tolerates_trailing_commas_and_comments() {
+        let v = parse_json(r#"{ "a": [1, 2, 3,], "b": { "c": "x,y", // note
+            "d": true, }, }"#).expect("parsed");
+        assert_eq!(v["a"].as_array().unwrap().len(), 3);
+        assert_eq!(v["b"]["c"], "x,y");
+        assert_eq!(v["b"]["d"], true);
+    }
+    #[test]
+    fn keeps_valid_json_valid() {
+        assert_eq!(parse_json(r#"{"a": "b,c"}"#).unwrap()["a"], "b,c");
+        assert!(parse_json("not json").is_none());
     }
 }

@@ -120,7 +120,7 @@ fn parse_args() -> Args {
 fn resolve_video(bg: &PathBuf) -> Result<String, String> {
     if bg.is_dir() {
         let txt = std::fs::read_to_string(bg.join("project.json")).map_err(|e| format!("project.json: {e}"))?;
-        let j: serde_json::Value = serde_json::from_str(&txt).map_err(|e| format!("project.json: {e}"))?;
+        let j: serde_json::Value = crate::pkg::parse_json(&txt).ok_or("project.json: invalid JSON")?;
         let ty = j["type"].as_str().unwrap_or("").to_lowercase();
         if ty != "video" { return Err(format!("unsupported wallpaper type '{ty}' (only video)")); }
         let f = j["file"].as_str().ok_or("project.json has no \"file\"")?;

@@ -19,12 +19,12 @@ use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_l
 pub fn is_scene(bg: &Path) -> bool {
     if !bg.is_dir() { return false; }
     let Ok(t) = std::fs::read_to_string(bg.join("project.json")) else { return false };
-    serde_json::from_str::<serde_json::Value>(&t).map(|j| j["type"].as_str().map(|s| s.eq_ignore_ascii_case("scene")).unwrap_or(false)).unwrap_or(false)
+    crate::pkg::parse_json(&t).map(|j| j["type"].as_str().map(|s| s.eq_ignore_ascii_case("scene")).unwrap_or(false)).unwrap_or(false)
 }
 
 pub fn load(args: &Args) -> Result<(Vfs, Scene), String> {
     let txt = std::fs::read_to_string(args.bg.join("project.json")).map_err(|e| format!("project.json: {e}"))?;
-    let proj: serde_json::Value = serde_json::from_str(&txt).map_err(|e| format!("project.json: {e}"))?;
+    let proj: serde_json::Value = crate::pkg::parse_json(&txt).ok_or("project.json: invalid JSON")?;
     let props = Props::load(&proj, &args.props);
     let vfs = Vfs::open(&args.bg, args.assets_dir.clone())?;
     let file = proj["file"].as_str().unwrap_or("scene.json").to_string();
