@@ -119,7 +119,7 @@ fn parse_def(j: &Value, vfs: &Vfs, ov: &Ov, notes: &mut Vec<String>) -> Option<D
         match name {
             "movement" => { d.drag = num(&o, "drag", 0.0); d.gravity = vec3(&o, "gravity", [0.0; 3]); }
             "angularmovement" => d.angforce = vec3(&o, "force", [0.0; 3]),
-            "alphafade" => d.fade = (num(&o, "fadeintime", 0.5), num(&o, "fadeouttime", 1.0)),
+            "alphafade" => d.fade = (num(&o, "fadeintime", 0.5), num(&o, "fadeouttime", 0.5)),
             "sizechange" => d.sizech.push(Ramp { s: num(&o, "startvalue", 1.0), e: num(&o, "endvalue", 0.0), t0: num(&o, "starttime", 0.0), t1: num(&o, "endtime", 1.0) }),
             "alphachange" => d.alphach.push(Ramp { s: num(&o, "startvalue", 1.0), e: num(&o, "endvalue", 0.0), t0: num(&o, "starttime", 0.0), t1: num(&o, "endtime", 1.0) }),
             "colorchange" => d.colch.push(([vec3(&o, "startvalue", [1.0; 3]), vec3(&o, "endvalue", [0.0; 3])], num(&o, "starttime", 0.0), num(&o, "endtime", 1.0))),
