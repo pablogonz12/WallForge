@@ -81,7 +81,7 @@ fn parse_def(j: &Value, vfs: &Vfs, ov: &Ov, notes: &mut Vec<String>) -> Option<D
     let mut d = Def {
         maxcount: ((num(j, "maxcount", 100.0) * ov.count).ceil().max(1.0) as usize).min(HARD_CAP), emitters: vec![],
         life: Range { min: 0.0, max: 1.0, exp: 1.0 }, size: Range { min: 0.0, max: 20.0, exp: 1.0 }, alpha: Range { min: 1.0, max: 1.0, exp: 1.0 },
-        vel: ([[0.0; 3]; 2], 1.0), rot: [[0.0; 3], [0.0, 0.0, 0.0]], angv: [[0.0; 3]; 2], col: [[0.0; 3], [1.0; 3]], tvel: None,
+        vel: ([[0.0; 3]; 2], 1.0), rot: [[0.0; 3], [0.0, 0.0, 0.0]], angv: [[0.0; 3]; 2], col: [[1.0; 3], [1.0; 3]], tvel: None,
         drag: 0.0, gravity: [0.0; 3], angforce: [0.0; 3], fade: (0.5, 1.0), sizech: vec![], alphach: vec![], colch: vec![],
         osc_a: vec![], osc_s: vec![], osc_p: vec![], turb: vec![], starttime: num(j, "starttime", 0.0).clamp(0.0, 60.0),
         blend: if mat.blending == "additive" { Blend::Add } else { Blend::Alpha },
@@ -130,6 +130,8 @@ fn parse_def(j: &Value, vfs: &Vfs, ov: &Ov, notes: &mut Vec<String>) -> Option<D
             o => notes.push(format!("operator {o}")),
         }
     }
+    if mat.combos.get("REFRACT").and_then(|v| fv(Some(v))).and_then(|v| v.first().copied()).unwrap_or(0.0) != 0.0 { notes.push("refraction material (system not drawn)".into()); return None; }
+    if arr("renderer").is_empty() { notes.push("no renderer (system not drawn)".into()); return None; }
     for r in arr("renderer") {
         match r.get("name").and_then(|v| v.as_str()).unwrap_or("") { "sprite" => {} o => notes.push(format!("renderer {o} drawn as sprite")) }
     }
@@ -243,7 +245,7 @@ impl Sys {
 
 // ---------------- public set ----------------
 #[derive(Default)]
-pub struct Set { sys: Vec<Sys>, prog: u32, u_mvp: i32, u_ratio: i32, u_over: i32, last: Option<f32>, white: u32, cache: HashMap<String, Option<(u32, Vec<[f32; 4]>, [f32; 4], f32)>> }
+pub struct Set { seen: std::collections::HashSet<String>, sys: Vec<Sys>, prog: u32, u_mvp: i32, u_ratio: i32, u_over: i32, last: Option<f32>, white: u32, cache: HashMap<String, Option<(u32, Vec<[f32; 4]>, [f32; 4], f32)>> }
 
 fn gl_swizzle(id: u32, fmt: Fmt) {
     let sw: Option<[i32; 4]> = match fmt { Fmt::R8 => Some([gl::ONE as i32, gl::ONE as i32, gl::ONE as i32, gl::RED as i32]), Fmt::Rg88 => Some([gl::RED as i32, gl::RED as i32, gl::RED as i32, gl::GREEN as i32]), _ => None };
@@ -273,9 +275,10 @@ impl Set {
             if frames.len() < 2 {
                 if let Some(s) = vfs.read_json(&path.replace(".tex", ".tex-json")).and_then(|j| j.get("spritesheetsequences").and_then(|v| v.as_array()).and_then(|a| a.first().cloned())) {
                     let (n, w, h) = (num(&s, "frames", 1.0) as usize, num(&s, "width", 0.0), num(&s, "height", 0.0));
-                    if n > 1 && w >= 1.0 && h >= 1.0 { let per = (t.tex_w as f32 / w).floor().max(1.0) as usize; frames = (0..n.min(4096)).map(|i| tex::SpriteFrame { x: (i % per) as f32 * w, y: (i / per) as f32 * h, w, h, dur: 0.1 }).collect(); }
+                    if n > 1 && w >= 1.0 && h >= 1.0 { let per = (t.tex_w as f32 / w + 0.05).floor().max(1.0) as usize; frames = (0..n.min(4096)).map(|i| tex::SpriteFrame { x: (i % per) as f32 * w, y: (i / per) as f32 * h, w, h, dur: 0.1 }).collect(); }
                 }
             }
+            if std::env::var("WF_DBG").is_ok() { eprintln!("particles: tex {path} {}x{} img {}x{} frames {:?}", t.tex_w, t.tex_h, t.img_w, t.img_h, frames); }
             let gt = tex::upload(&t, 256, 256, &meta, s3tc).ok()?;
             if let Payload::Raw { fmt, .. } = &t.payload { gl_swizzle(gt.id, *fmt); }
             unsafe { gl::BindTexture(gl::TEXTURE_2D, gt.id); for k in [gl::TEXTURE_WRAP_S, gl::TEXTURE_WRAP_T] { gl::TexParameteri(gl::TEXTURE_2D, k, gl::CLAMP_TO_EDGE as i32); } }
@@ -299,8 +302,9 @@ impl Set {
         let ov = Ov { count: g1("count").unwrap_or(1.0).max(0.0), rate: g1("rate").unwrap_or(1.0).max(0.0), size: g1("size").unwrap_or(1.0), speed: g1("speed").unwrap_or(1.0), life: g1("lifetime").unwrap_or(1.0).max(0.01), alpha: g1("alpha").unwrap_or(1.0), color };
         let Some(j) = vfs.read_json(file) else { eprintln!("wallforge-render: note: particle {file} not found, skipped"); return };
         let mut notes = vec![];
-        let Some(def) = parse_def(&j, vfs, &ov, &mut notes) else { eprintln!("wallforge-render: note: particle {file}: no usable material, skipped"); return };
-        if !notes.is_empty() { notes.dedup(); eprintln!("wallforge-render: note: particle {file}: ignoring {}", notes.join(", ")); }
+        let def = parse_def(&j, vfs, &ov, &mut notes);
+        if !notes.is_empty() && self.seen.insert(file.to_string()) { notes.dedup(); eprintln!("wallforge-render: note: particle {file}: ignoring {}", notes.join(", ")); }
+        let Some(def) = def else { if notes.is_empty() { eprintln!("wallforge-render: note: particle {file}: no usable material, skipped"); } return };
         if self.prog == 0 {
             match crate::engine::link(VS, FS) {
                 Ok(p) => unsafe { self.prog = p; self.u_mvp = gl::GetUniformLocation(p, c"mvp".as_ptr()); self.u_ratio = gl::GetUniformLocation(p, c"ratio".as_ptr()); self.u_over = gl::GetUniformLocation(p, c"overbright".as_ptr()); },
@@ -340,6 +344,7 @@ impl Set {
         for s in self.sys.iter_mut().filter(|s| s.at == at) {
             let n = s.fill();
             if std::env::var("WF_DBG").is_ok() { eprintln!("particles: system at layer {} alive {} drawn {} max {} tex {} ratio {:.2} frames {}", s.at, s.ps.len(), n, s.def.maxcount, s.tex, s.ratio, s.frames.len()); }
+            if std::env::var("WF_DBG").map(|v| v == "2").unwrap_or(false) { for k in 0..n.min(3) { eprintln!("  p{k}: {:?}", &s.buf[k * 12..k * 12 + 12]); } eprintln!("  world {:?}", &s.world[..]); }
             if n == 0 { continue; }
             let mvp = scene::mul(view, &s.world);
             unsafe {
