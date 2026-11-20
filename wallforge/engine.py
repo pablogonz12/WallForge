@@ -177,6 +177,8 @@ def build_native_args(cfg, item: library.Item, output: str, overrides: dict | No
             a += ["--assets-dir", str(a_dir)]
         if e.get("disable_particles"):
             a.append("--disable-particles")
+        if e.get("no_audio_processing"):
+            a.append("--no-audio-processing")
         for k, v in vals.items():
             spec = props.get(k)
             if isinstance(spec, dict) and v not in (None, "") and spec.get("type") != "scenetexture":

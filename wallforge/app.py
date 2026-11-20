@@ -1156,6 +1156,8 @@ class Window(Adw.ApplicationWindow):
         spin("Render resolution (%)", "render_scale", 25, 100)
         switch("Reduce frame rate and resolution on battery", "reduce_on_battery")
         switch("Pause wallpapers on battery", "pause_on_battery")
+        switch("Disable audio capture for visualisers", "no_audio_processing",
+               "On: scene wallpapers that react to music stay still instead of capturing the sound your system plays.")
         switch("Disable mouse interaction", "disable_mouse")
         switch("Disable parallax", "disable_parallax")
         switch("Keep playing under fullscreen apps", "no_fullscreen_pause")

@@ -49,6 +49,12 @@ log for lines such as `effect ... skipped` or `unsupported`. Please report it (s
 **A wallpaper is marked as a 3D scene and cannot be applied.**
 3D scenes (models, perspective camera) are not supported.
 
+**A visualiser is flat or does not react to music.**
+Audio-reactive wallpapers listen to the system's audio output (the PipeWire/PulseAudio monitor of the default sink),
+not to a microphone. Check that sound is playing through that sink, that Settings > Effects and power > "Disable audio
+capture for visualisers" is off, and that the wallpaper is using the native renderer. Re-apply the wallpaper after
+changing either. Silent sinks or a Pulse server that is not running leave the visualiser still.
+
 **A clock or visualiser in a wallpaper does not move.**
 Wallpaper Engine scripts (SceneScript) are not run, so anything a script animates stays at its starting value,
 apart from common clock and date texts, which are recognised. Audio-reactive effects receive silence because there

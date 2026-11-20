@@ -56,6 +56,8 @@ with layer-shell support (niri, Hyprland, Sway, ...).
 - **Palette sync** with Noctalia, matugen, wallust, pywal or a custom command.
 - **Restore at login**: `wallforge.sh --restore` re-applies your saved wallpapers (toggle in Settings).
 - **Rotation**: change the wallpaper on a timer, at random or in library order, optionally only through favourites.
+- **Audio-reactive wallpapers** hear what you play: visualisers and spectrum effects are driven by the system's audio
+  output, with no microphone involved, and stay idle when no wallpaper asks for them.
 - **Low cost by default**: one small renderer per screen, still scenes drawn once and then frozen, a render
   resolution setting, and battery saving that lowers the frame rate (or pauses everything) when you unplug.
 - **Safe**: a crash shows a toast with a "View log" button, a dead renderer is restarted automatically, broken files

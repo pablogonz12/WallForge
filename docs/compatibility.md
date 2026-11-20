@@ -41,7 +41,7 @@ not listed here, please [report it](troubleshooting.md#reporting-a-wallpaper-tha
 | User properties (everything in the wallpaper's settings panel) | Yes, including image slots |
 | Property-bound visibility | Yes for plain bindings and simple show/hide scripts |
 | SceneScript (general scripting) | No. Scripted motion and logic stay at their starting state |
-| Audio-reactive effects and visualisers | Drawn, but they receive silence (no audio capture yet) |
+| Audio-reactive effects and visualisers | Yes: the system's audio output is captured (PipeWire/PulseAudio monitor) and fed to the spectrum uniforms. Only started when a wallpaper's shaders ask for it; switch it off in Settings |
 | Sound layers | No |
 | Camera parallax, mouse interaction, cursor effects | No. Camera framing itself comes from the scene's orthographic projection and is matched; wallpapers whose previews are close-up crops (for example maps meant to span two monitors) show the same centre region Wallpaper Engine shows on one screen |
 | Camera shake, camera paths | No |
