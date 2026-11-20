@@ -106,7 +106,7 @@ pub struct Engine {
     vao: u32, view: Mat4, pub clear: [f32; 3], scene_wh: (f32, f32),
     pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32,
     out: (i32, i32), scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
-    t0: std::time::Instant, time_override: Option<f32>,
+    t0: std::time::Instant, time_override: Option<f32>, videos: Vec<crate::video::VideoTex>,
 }
 
 pub fn view_matrix(sw: f32, sh: f32, ow: i32, oh: i32, scaling: Scaling) -> (Mat4, f32, f32) {
@@ -146,7 +146,7 @@ impl Engine {
         }
         let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
             vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
-            out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None };
+            out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![] };
         e.rebuild();
         Ok(e)
     }
@@ -169,7 +169,7 @@ impl Engine {
 
     /// (Re)build all GPU resources for the current output size (texture mips / FBO sizes depend on it).
     fn rebuild(&mut self) {
-        self.layers.clear(); self.vram = 0; self.animated = false; self.scene_rt = None;
+        self.videos.clear(); self.layers.clear(); self.vram = 0; self.animated = false; self.scene_rt = None;
         let (v, sx, sy) = view_matrix(self.scene_wh.0, self.scene_wh.1, self.out.0, self.out.1, self.scaling);
         self.view = v;
         let s3tc = tex::has_s3tc();
@@ -200,7 +200,8 @@ impl Engine {
             let meta = self.vfs.read_json(&tp.replace(".tex", ".tex-json")).map(|j| tex::parse_meta(&j)).unwrap_or_default();
             let size = size_o.or(def.size_hint).unwrap_or([t.img_w as f32, t.img_h as f32]);
             let px = ((size[0] * scale[0].abs() * sx).ceil().max(1.0) as i32, (size[1] * scale[1].abs() * sy).ceil().max(1.0) as i32);
-            let gt = match tex::upload(&t, px.0 as u32, px.1 as u32, &meta, s3tc) { Ok(g) => g, Err(e) => { self.note(format!("layer '{name}': {e}, skipped")); continue } };
+            let up = if matches!(t.payload, tex::Payload::Mp4(_)) { tex::upload_video(&t, px.0 as u32, px.1 as u32, &meta).map(|(g, v)| { self.videos.push(v); self.animated = true; g }) } else { tex::upload(&t, px.0 as u32, px.1 as u32, &meta, s3tc) };
+            let gt = match up { Ok(g) => g, Err(e) => { self.note(format!("layer '{name}': {e}, skipped")); continue } };
             frames = t.frames.clone(); tex_wh = (t.tex_w as f32, t.tex_h as f32);
             (size, px, gt)
             };
@@ -329,7 +330,10 @@ impl Engine {
     }
 
     /// Stage-2 hook: audio spectrum / particle simulation step goes here.
-    pub fn tick(&mut self) {}
+    pub fn tick(&mut self) {
+        let fixed = self.time_override.map(|t| t as f64);
+        for v in &mut self.videos { v.update(fixed); }
+    }
 
     fn set_uniform(&self, u: &Uniform, l: i32, p: &Pass, mvp: &Mat4, t: f32, tex_res: &[(f32, f32)]) {
         let name = u.name.as_str();

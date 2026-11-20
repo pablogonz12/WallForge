@@ -336,6 +336,17 @@ pub fn upload(t: &Tex, want_w: u32, want_h: u32, meta: &TexMeta, s3tc: bool) -> 
     Ok(GlTex { id, w: ow, h: oh, bytes, compressed, flags, src, uv })
 }
 
+/// Embedded video texture: returns the GL texture description and the player that keeps it updated.
+pub fn upload_video(t: &Tex, want_w: u32, want_h: u32, meta: &TexMeta) -> Result<(GlTex, crate::video::VideoTex), String> {
+    let Payload::Mp4(b) = &t.payload else { return Err("tex: not a video".into()) };
+    let mut flags = t.flags;
+    if meta.clamp == Some(true) { flags |= FLAG_CLAMP; }
+    if meta.no_interp == Some(true) { flags |= FLAG_NO_INTERP; }
+    let v = crate::video::VideoTex::open(b, (want_w, want_h), flags & FLAG_CLAMP != 0, flags & FLAG_NO_INTERP != 0)?;
+    let (w, h) = v.size();
+    Ok((GlTex { id: v.tex, w, h, bytes: w as usize * h as usize * 4, compressed: false, flags, src: (t.img_w.max(1), t.img_h.max(1)), uv: [1.0, 1.0] }, v))
+}
+
 // ---------------- synthetic generators (tests + --make-test-scene) ----------------
 
 pub mod synth {
