@@ -19,8 +19,20 @@ gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
-from . import assets, config, engine, library, monitors, paths, theme, updater, weimport, workshop  # noqa: E402
-from . import __version__  # noqa: E402
+from . import (  # noqa: E402
+    __version__,  # noqa: E402
+    assets,
+    config,
+    engine,
+    library,
+    monitors,
+    paths,
+    rotation,
+    theme,
+    updater,
+    weimport,
+    workshop,
+)
 from .props import PropertyEditor  # noqa: E402
 
 APP_ID = "dev.wallforge.Wallforge"
@@ -573,35 +585,19 @@ class Window(Adw.ApplicationWindow):
     # ------------------------------------------------------------------ rotation
     def _rotate_pool(self) -> list:
         """Wallpapers the automatic rotation may pick (same filters as the library view)."""
-        fav = set(self.cfg.data.get("favorites") or [])
-        only_fav = bool(self.cfg.data.get("rotate_favorites"))
-        pool = []
-        for i in self.items:
-            if i.broken or self._hidden_reason(i):
-                continue
-            if i.kind == "web" and engine.web_missing():
-                continue
-            if only_fav and i.id not in fav:
-                continue
-            pool.append(i)
-        return pool
+        return rotation.candidates(
+            self.items,
+            hidden=self._hidden_reason,
+            favourites=self.cfg.data.get("favorites") or (),
+            only_favourites=bool(self.cfg.data.get("rotate_favorites")),
+            web_missing=bool(engine.web_missing()),
+        )
 
     def _next_rotated(self):
         """The wallpaper a timer tick should switch to, avoiding what is already showing."""
-        pool = self._rotate_pool()
-        if not pool:
-            return None
         cur = {v.get("id") for v in self.cfg.data["outputs"].values() if v.get("id")}
-        cand = [i for i in pool if i.id not in cur] or pool
-        if self.cfg.data.get("rotate_shuffle", True):
-            return random.choice(cand)
-        ids = [i.id for i in pool]
-        start = max((ids.index(x) for x in cur if x in ids), default=-1)
-        for k in range(1, len(pool) + 1):
-            it = pool[(start + k) % len(pool)]
-            if it.id not in cur:
-                return it
-        return pool[(start + 1) % len(pool)]
+        return rotation.next_item(self._rotate_pool(), cur,
+                                  shuffle=bool(self.cfg.data.get("rotate_shuffle", True)))
 
     def _maybe_rotate(self):
         """Settings timer: change every wallpaper once the configured interval has passed."""

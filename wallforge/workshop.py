@@ -5,7 +5,11 @@ The browse page is a React SSR page; items are embedded as JSON in
 Usage: workshop_browse.py [query] [--sort trend|mostrecent|totaluniquesubscribers|textsearch]
        [--page N] [--tag Scene --tag Video] [--period 7] [--details ID ...]
 """
-import json, re, sys, time, argparse, urllib.request, urllib.parse
+import json
+import re
+import time
+import urllib.parse
+import urllib.request
 
 APPID = 431960
 UA = "Mozilla/5.0 (X11; Linux x86_64) wallforge/0.1"
@@ -129,11 +133,10 @@ def details(ids):
 
 # ---- download through the running Steam client ---------------------------------
 import asyncio
-import os
 import subprocess
 from pathlib import Path
 
-from . import library, paths
+from . import paths
 
 
 def installed(item_id: str) -> bool:
@@ -188,7 +191,6 @@ def subscribe(item_id: str) -> str:
     port = _cdp_port()
     if not port:
         return "manual"
-    import time
     for _ in range(12):
         time.sleep(1)
         try:

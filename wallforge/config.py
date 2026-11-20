@@ -1,6 +1,7 @@
 """Persistent settings (~/.config/wallforge/config.json)."""
 from __future__ import annotations
 
+import copy
 import json
 import os
 import tempfile
@@ -54,7 +55,7 @@ DEFAULTS = {
 
 
 def _merge(base, over):
-    out = dict(base)
+    out = copy.deepcopy(base)
     for k, v in (over or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict) and k not in ("outputs", "values", "volumes"):
             out[k] = _merge(out[k], v)
@@ -65,7 +66,7 @@ def _merge(base, over):
 
 class Config:
     def __init__(self):
-        self.data = dict(DEFAULTS)
+        self.data = copy.deepcopy(DEFAULTS)
         self.load()
 
     def load(self):
