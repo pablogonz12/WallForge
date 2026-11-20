@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Headless batch: render every scene wallpaper to a PNG and classify the result.
-usage: python3 -I batch.py [--bin PATH] [--out DIR] [--size WxH] [--time S] [ids...]
-Writes DIR/<id>.png, DIR/<id>.log, DIR/results.json and prints a table."""
+"""Headless batch: render every installed scene wallpaper to a PNG and classify the result.
+usage: python3 -I batch.py [--bin PATH] [--out DIR] [--size WxH] [--time S] [--workshop DIR] [ids...]
+Writes DIR/<id>.png, DIR/<id>.log and DIR/results.json, and prints a table.
+Classes: works (no warnings), partial (something was skipped), unsupported (3D scene), fails (crash or no image).
+"works" only means nothing was skipped: compare the PNGs with the previews (compare.py) to judge the picture."""
 import json, os, re, subprocess, sys, glob
 a = sys.argv[1:]
 def opt(n, d):
@@ -10,8 +12,9 @@ def opt(n, d):
     return d
 here = os.path.dirname(os.path.abspath(__file__))
 BIN = opt('--bin', os.path.join(here, '..', 'target', 'release', 'wallforge-render'))
-OUT = opt('--out', '/tmp/oc/shots'); SIZE = opt('--size', '640x360'); TIME = opt('--time', '2')
-W = os.path.expanduser('~/.local/share/Steam/steamapps/workshop/content/431960')
+import tempfile
+OUT = opt('--out', os.path.join(tempfile.gettempdir(), 'wallforge-shots')); SIZE = opt('--size', '640x360'); TIME = opt('--time', '2')
+W = os.path.expanduser(opt('--workshop', '~/.local/share/Steam/steamapps/workshop/content/431960'))
 os.makedirs(OUT, exist_ok=True)
 ids = a or sorted(os.listdir(W))
 res = {}

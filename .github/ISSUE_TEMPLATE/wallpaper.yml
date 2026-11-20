@@ -1,0 +1,35 @@
+name: A wallpaper looks wrong or does not play
+description: A scene, video or web wallpaper that renders differently from Wallpaper Engine, or not at all.
+labels: [wallpaper]
+body:
+  - type: input
+    id: link
+    attributes:
+      label: Workshop link
+      description: Select the wallpaper in WallForge and press the share button to copy it.
+      placeholder: https://steamcommunity.com/sharedfiles/filedetails/?id=...
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What is wrong
+      description: What you see and what you expected. A screenshot helps a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: >-
+        The contents of $XDG_RUNTIME_DIR/wallforge/<output>.log (or "View log" in the crash toast), or the output of
+        `wallforge-render --check <wallpaper folder>`.
+      render: text
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Compositor, GPU and driver, WallForge version (Settings > Updates).
+      placeholder: niri 25.08, AMD RX 7800 XT (Mesa 25.2), WallForge 0.5.0
+    validations:
+      required: true

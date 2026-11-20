@@ -1,90 +1,167 @@
-<p align="center"><img src="assets/logo-banner.png" alt="Wallforge" width="720"></p>
+<p align="center"><img src="assets/logo-banner.png" alt="WallForge" width="720"></p>
 
-# Wallforge
+# WallForge
 
-### Your Wallpaper Engine library, running natively on Linux. One small Rust renderer, no Windows, no Wine, no extra engine.
+### Your Wallpaper Engine library, running natively on Linux. One small Rust renderer, no Windows, no Wine.
 
-Wallforge is a GTK4 / libadwaita app and a tiny GPU renderer (`wallforge-render`) that plays the
-[Wallpaper Engine](https://store.steampowered.com/app/431960/) wallpapers you already own on any Wayland desktop.
+WallForge is a GTK4 / libadwaita app and a small GPU renderer (`wallforge-render`) that plays the
+[Wallpaper Engine](https://store.steampowered.com/app/431960/) wallpapers you already own on any Wayland desktop
+with layer-shell support (niri, Hyprland, Sway, ...).
 
 | | |
 |---|---|
-| **Self-contained** | Its own Rust renderer plays video and scene wallpapers. `linux-wallpaperengine` is not needed. |
-| **Light on the GPU** | VAAPI hardware decode, zero-copy import, compressed textures kept compressed, pauses when hidden. A 1080p video wallpaper takes about 93 MiB of VRAM, 53 MiB with software decode. |
-| **Looks right by default** | **Auto fit** fills the screen (ultrawide art is cropped) and keeps portrait art whole, with no setting to touch. |
+| **Self-contained** | Its own renderer plays video and scene wallpapers; web wallpapers run in WebKit. No other engine is needed. |
+| **Light on the GPU** | VAAPI hardware decode, zero-copy import, compressed textures kept compressed, pauses when hidden. A 1080p video wallpaper takes about 93 MiB of VRAM. |
+| **Looks right by default** | Auto fit fills the screen (ultrawide art is cropped) and keeps portrait art whole. |
+| **Brings your setup along** | Imports your settings from Wallpaper Engine's own `config.json`. |
+| **Easy to share** | One click copies a wallpaper's Steam Workshop link; paste a link to open that wallpaper. |
 | **Your palette follows** | Noctalia, matugen, wallust, pywal or your own command pick up each wallpaper's colours. |
-| **Stays up to date** | A git install updates itself in the background, checks that the new version loads and rolls back if it does not. |
 
-## Features
+## Contents
 
-- **Library** of everything you subscribed to, with search, type filter, sort, favourites and a random button.
-- **All property types** editable per wallpaper (sliders, colours, combos, text, and image slots), applied live.
-- **Discover tab** to browse the Steam Workshop, with one-click Get through your running Steam client (experimental: if the click fails, Steam opens the page for you).
-- **Per monitor**: apply to one screen or all, ultrawide wallpapers are cropped to fill 16:9 screens (or skipped, if you prefer).
-- **Auto scaling** (default): crops to fill the screen, ultrawide art included, and only fits portrait wallpapers whole. Fill, fit and stretch stay one click away in Settings.
-- **Sensible defaults**: anime and mature content hidden (switch them on in Settings).
-- **Works on** niri, Hyprland, Sway and other wlroots compositors (monitor detection falls back to GDK).
-- **Autostart**: `wallforge.sh --restore` re-applies your saved wallpapers at login (toggle in Settings).
-- **Safe**: crash toast with a "View log" button, a watchdog for broken files, and unsupported 3D scenes are detected up front.
-- Keyboard shortcuts: `Ctrl+F` search, `Ctrl+R` random, `Ctrl+,` settings, `F5` rescan.
+- [What plays](#what-plays)
+- [Features](#features)
+- [Install](#install)
+- [Share a wallpaper](#share-a-wallpaper)
+- [Import your Wallpaper Engine settings](#import-your-wallpaper-engine-settings)
+- [Wallpaper Engine's assets](#wallpaper-engines-assets)
+- [Command line](#command-line)
+- [Updates](#updates)
+- [When a wallpaper looks wrong](#when-a-wallpaper-looks-wrong)
+- [More documentation](#more-documentation)
 
-## What plays today
+## What plays
 
 | Wallpaper type | Status |
 |---|---|
 | Video | Works: hardware decode, audio, gapless loop, volume and mute. |
-| Scene (2D) | Native renderer, in active development. Layers, effects and your property edits work; particles and audio-reactive effects are next. If you also have `linux-wallpaperengine` installed it is used as a fallback. |
-| Web | Not supported yet. |
-| Application | Windows programs, never supported on Linux. |
-| 3D scenes | Not supported. Wallforge tells you before you apply one. |
+| Scene (2D) | Works for most wallpapers: layers, multi-pass effects, particle systems, embedded video layers, text layers, your property edits. See [compatibility](docs/compatibility.md) for what is still missing. |
+| Web | Works, in WebKit, with the wallpaper's properties. Needs `webkitgtk-6.0` and `gtk4-layer-shell`. Audio visualisers get silence for now. |
+| 3D scenes | Not supported. WallForge tells you before you apply one. |
+| Application | Windows programs, not supported on Linux. |
 
-Details and the renderer's flags are in [`render/README.md`](render/README.md).
+## Features
 
-## You do not need Wallpaper Engine installed, but you do need to own it
+- **Library** of everything you subscribed to, with search, type filter, sort, favourites and a random button.
+- **Every property type** is editable per wallpaper (sliders, colours, combos, text, image slots) and applies live.
+- **Volume per wallpaper**, on top of the global volume and mute.
+- **Discover tab** browses the Steam Workshop, with one-click Get through your running Steam client
+  (experimental: if the click fails, Steam opens the page for you).
+- **Share and open links**: copy any wallpaper's Workshop link, or paste one into Discover.
+- **Import from Wallpaper Engine**: your customised wallpaper settings, volumes and playback rules.
+- **Per monitor**: apply to one screen or all. Ultrawide wallpapers are cropped to fill 16:9 screens, or skipped if you prefer.
+- **Auto scaling** by default; fill, fit and stretch are in Settings.
+- **Palette sync** with Noctalia, matugen, wallust, pywal or a custom command.
+- **Restore at login**: `wallforge.sh --restore` re-applies your saved wallpapers (toggle in Settings).
+- **Safe**: a crash shows a toast with a "View log" button, broken files are caught by a watchdog, and unsupported
+  3D scenes are detected before you apply them.
+- **Sensible defaults**: anime and mature content are hidden until you switch them on in Settings.
+- Keyboard: `Ctrl+F` search, `Ctrl+R` random, `Ctrl+,` settings, `F5` rescan.
 
-Scene wallpapers need Wallpaper Engine's `assets/` folder (shaders and textures). Wallforge never ships those files.
-Video wallpapers do not need them at all. Use whichever you prefer:
+## Install
 
-1. **Fetch from Steam (about 85 MB).** Settings > Setup > Fetch opens a terminal where you sign in to Steam with
-   [DepotDownloader](https://github.com/SteamRE/DepotDownloader) (pinned release, checksum verified). Your password
-   goes to DepotDownloader only, never to Wallforge. An account that does not own Wallpaper Engine is refused by Steam.
-2. **Install it in Steam** (about 0.8 GB) and Wallforge uses or copies its `assets/` folder.
+### Requirements
 
-Workshop wallpapers themselves are downloaded by the Steam client when you subscribe.
-
-## Requirements
-
+- A Wayland compositor with layer-shell support (niri, Hyprland, Sway, ...). GNOME Shell does not have it.
 - Python 3.11+, GTK 4, libadwaita 1.5+, PyGObject, Pillow, aiohttp, ffmpeg
-- Rust (cargo) and clang to build the renderer (`install.sh` and the first start do it, about a minute), plus ffmpeg, libva and EGL. Arch: `sudo pacman -S rust clang ffmpeg libva`
-- Steam running, signed in to an account that owns Wallpaper Engine, for Discover > Get
-- A Wayland compositor with layer-shell support (niri, Hyprland, Sway, ...)
+- Rust (cargo) and clang to build the renderer, plus libva and EGL
+- For web wallpapers: `webkitgtk-6.0` and `gtk4-layer-shell`
+- Steam, signed in to an account that owns Wallpaper Engine, for downloading Workshop wallpapers
 
-## Install and run
+Arch / CachyOS:
 
-**Arch / CachyOS (AUR, once published):** `yay -S wallforge-git`
+```bash
+sudo pacman -S python-gobject gtk4 libadwaita python-pillow python-aiohttp ffmpeg libva rust clang \
+               webkitgtk-6.0 gtk4-layer-shell
+```
 
-**From source:**
+### From source
 
 ```bash
 git clone https://github.com/pgm1207/wallforge
 cd wallforge
-./install.sh        # builds the renderer, adds a menu entry and icon
+./install.sh        # builds the renderer (about a minute), adds a menu entry and icon
 ./wallforge.sh
 ```
 
+### AUR
+
+A `wallforge-git` PKGBUILD is in [`packaging/aur/`](packaging/aur). It is not published on the AUR yet; build it
+with `makepkg -si` from that folder.
+
+## Share a wallpaper
+
+Select a wallpaper and press the **share button** in its panel (next to the favourite star). The link to its Steam
+Workshop page is copied to the clipboard, and the toast offers to open the page. Discover cards have the same button.
+
+To open a link someone sent you, paste it into the **Discover** search box and press Enter. If you already have the
+wallpaper it opens in your library; otherwise its card appears with a Get button. A bare Workshop id works too.
+
+Only wallpapers that are on the Workshop have a link. The button is greyed out for local projects.
+
+## Import your Wallpaper Engine settings
+
+**Settings > Wallpaper Engine > Import settings** reads the `config.json` that Wallpaper Engine keeps in its install
+folder (`steamapps/common/wallpaper_engine/config.json`). If you used Wallpaper Engine on Windows, pick the file from
+your Windows drive with **Choose file**. You see what would change before anything is written.
+
+| Imported | Not imported |
+|---|---|
+| Each wallpaper's customised properties (colours, sliders, switches, combos, text) | Playlists |
+| Each wallpaper's volume | Per-wallpaper alignment, playback speed and colour adjustments |
+| Frame rate limit | Image and file properties (they point at Windows paths) |
+| Whether to pause under fullscreen apps | Settings of wallpapers that are not installed here |
+| Optionally, the wallpaper that was active | |
+
+From a terminal: `./wallforge.sh --import-we [path/to/config.json] [--dry-run]`.
+Details are in [docs/wallpaper-engine-import.md](docs/wallpaper-engine-import.md).
+
+## Wallpaper Engine's assets
+
+You do not need Wallpaper Engine installed, but you do need to own it. Scene wallpapers need its `assets/` folder
+(shaders and textures), which WallForge never ships. Video and web wallpapers do not need it. Use either:
+
+1. **Fetch from Steam (about 85 MB).** Settings > Setup > Fetch opens a terminal where you sign in to Steam with
+   [DepotDownloader](https://github.com/SteamRE/DepotDownloader) (pinned release, checksum verified). Your password
+   goes to DepotDownloader only, never to WallForge. An account that does not own Wallpaper Engine is refused by Steam.
+2. **Install it in Steam** (about 0.8 GB). WallForge uses its `assets/` folder directly.
+
+Workshop wallpapers themselves are downloaded by the Steam client when you subscribe.
+
+## Command line
+
+```bash
+./wallforge.sh                         # the app
+./wallforge.sh --restore               # re-apply the saved wallpapers and exit (for autostart)
+./wallforge.sh --import-we [FILE] [--dry-run]   # import Wallpaper Engine settings
+```
+
+The renderer and the web player can be run on their own; see [`render/README.md`](render/README.md).
+
 ## Updates
 
-Wallforge checks GitHub at start and every few hours (switch it off in Settings > Updates). A git clone updates
-itself like Steam does: it downloads the new version in the background (`git pull --ff-only`), checks that it loads
-(and rolls back if not), then shows "Restart now". Turn that off to get an "Update" button instead. Local edits in
-the folder are never overwritten. The AUR package only tells you and leaves the update to your package manager. The package lives in `packaging/aur/`.
+WallForge checks GitHub at start and every few hours (switch it off in Settings > Updates). A git clone updates
+itself: it pulls the new version in the background (`git pull --ff-only`), checks that it loads, rolls back if it
+does not, then offers "Restart now". Local edits in the folder are never overwritten. A package install only tells
+you and leaves the update to your package manager.
 
-## Contributing
+## When a wallpaper looks wrong
 
-Bug reports with a wallpaper id and the log (`~/.local/state/wallforge/<output>.log`) help the most, especially for
-scene wallpapers that render wrongly. Pull requests welcome.
+Scene wallpapers are the hard part, and some still render differently from Wallpaper Engine. Please
+[open an issue](https://github.com/pgm1207/wallforge/issues/new/choose) with the wallpaper's Workshop link (the share
+button copies it) and the log, which is at `$XDG_RUNTIME_DIR/wallforge/<output>.log` or behind "View log" in the
+crash toast. [docs/troubleshooting.md](docs/troubleshooting.md) covers the common problems.
+
+## More documentation
+
+- [docs/compatibility.md](docs/compatibility.md): which Wallpaper Engine features are supported
+- [docs/wallpaper-engine-import.md](docs/wallpaper-engine-import.md): exactly what the import reads
+- [docs/troubleshooting.md](docs/troubleshooting.md): setup problems, logs, known limits
+- [render/README.md](render/README.md): the renderer, its flags and internals
+- [CONTRIBUTING.md](CONTRIBUTING.md): building, testing against your library, sending fixes
+- [CHANGELOG.md](CHANGELOG.md)
 
 ## Disclaimer
 
-Not affiliated with Wallpaper Engine / Wallpaper Engine Team or Valve. No Wallpaper Engine files are included or
+Not affiliated with Wallpaper Engine, the Wallpaper Engine Team or Valve. No Wallpaper Engine files are included or
 redistributed; they come from your own Steam account. MIT licensed.

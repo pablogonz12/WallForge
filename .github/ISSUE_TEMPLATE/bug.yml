@@ -1,0 +1,24 @@
+name: Bug in the app
+description: Something in the WallForge window, Discover, the import, sharing or setup does not work.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Terminal output
+      description: Start WallForge from a terminal (`./wallforge.sh`) and paste anything it prints.
+      render: text
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Distribution, compositor, how you installed WallForge (git or package) and its version.
+    validations:
+      required: true

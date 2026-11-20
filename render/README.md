@@ -1,13 +1,20 @@
-# wallforge-render (beta)
+# wallforge-render
 
-Standalone, low-overhead Wayland wallpaper renderer (wlr-layer-shell + EGL/GLES3).
-Milestone scope: Wallpaper Engine **video** wallpapers (`project.json` with `"type":"video"`, `"file":"x.mp4"`).
+Standalone, low-overhead Wayland wallpaper renderer (wlr-layer-shell + EGL/GLES3) for Wallpaper Engine **video**
+and **scene** wallpapers. WallForge starts one process per output; it can also be run by hand.
 
 ```
 wallforge-render --output DP-2 --bg <wallpaper dir | video file> \
   [--scaling fill|fit|stretch] [--fps 30] [--layer background|bottom|top|overlay] \
-  [--silent] [--volume N] [--duration SECS] [--software]
+  [--silent] [--volume N] [--duration SECS] [--software] \
+  [--assets-dir DIR] [--set-property key=value]... [--disable-particles]      (scenes)
+wallforge-render --check <wallpaper dir | video file>                           (JSON report, no window)
+wallforge-render --bg DIR --screenshot out.png [--screenshot-size WxH] [--screenshot-time SECS]   (headless)
 ```
+
+Web wallpapers are not handled here: they run in `wallforge/webplayer.py` (WebKit), see the end of this file.
+
+## Video wallpapers
 
 - Decode: VAAPI hardware decode, frames exported as DMA-BUF (DRM PRIME) and imported zero-copy into EGL
   (`EGL_EXT_image_dma_buf_import`): Y as R8 and UV as GR88 textures, YUV->RGB in the shader. No RGBA copies.
@@ -21,7 +28,6 @@ wallforge-render --output DP-2 --bg <wallpaper dir | video file> \
 - SIGTERM/SIGINT exit cleanly.
 - Audio: ffmpeg decode -> libpulse-simple (PipeWire's pulse server), one extra thread, `--volume 0..100` (default 100), `--silent` off. Synced to the video clock with drift correction, loops with the video, paused with presentation. No audio stream = nothing started.
 - Fractional scale via wp-fractional-scale-v1 + wp-viewporter (buffer in physical pixels); integer scale fallback. If the compositor goes away the renderer prints a message and exits.
-- Only `video` projects are supported for now; other types exit with an error.
 
 ## Scene wallpapers (Wallpaper Engine `"type": "scene"`)
 
@@ -35,12 +41,31 @@ Supported: image layers (transform, parenting, alpha, tint, translucent/normal/a
 effects: the WE shader dialect is translated to GLSL ES 3.00 with ping-pong FBOs. Static scenes render once and then
 sleep; only effects using `g_Time` redraw every frame.
 
-Not yet (stage 2): particles, audio-reactive uniforms, sound objects, puppet animation, video layers.
-3D scenes (perspective camera / `.mdl`) print one line and exit with code 3. `--check` prints a JSON report
-(`supported`, `unsupported`, `stage2_pending`, `missing_files`); exit code 3 when unsupported.
-Known limit: ES 3.00 is strict about implicit int->float conversions the WE dialect allows; such an effect
-fails to compile and is skipped with a warning. Untested against real Wallpaper Engine content so far.
-`--make-test-scene DIR` writes a synthetic scene used for development.
+Also supported:
+- Particle systems (`particles.rs`): box and sphere emitters, the common initializers and operators, sprite sheets,
+  additive and translucent blending, one instanced draw per system, seeded and prewarmed so screenshots are
+  repeatable. Trails and ropes are drawn as plain sprites. `--disable-particles` turns them off.
+- Embedded video textures (a `.tex` holding an MP4): decoded in software on a thread, looped, uploaded each frame.
+- Text layers (`text.rs`).
+- Shader repair: ES 3.00 rejects implicit conversions the WE dialect allows (int/float mixing, vector truncation,
+  float array indices, float `%`, varying width mismatches). The translator patches the source from the compiler's
+  error log and retries, so such effects compile instead of being skipped.
+
+Not yet: SceneScript, audio-reactive uniforms (they read as silence), sound objects, puppet animation, parallax,
+mouse interaction, particle trails/ropes/control points. 3D scenes (perspective camera / `.mdl`) print one line and
+exit with code 3. The user-facing list is in [`docs/compatibility.md`](../docs/compatibility.md).
+
+`--check` prints a JSON report (`supported`, `unsupported`, `unsupported_layers`, `unsupported_effects`,
+`missing_files`, particle and sound counts); exit code 3 when unsupported.
+`--make-test-scene DIR` writes a synthetic scene used by the tests.
+
+Debugging (environment): `WF_MAXFX=n` applies only the first n effects of each layer, `WF_ONLYFX=i` only effect i,
+`WF_PASSN=n` only the first n passes of an effect, `WF_DUMP_ALL=dir` writes every translated shader to a folder.
+
+## Tools
+- `tools/batch.py` renders every installed scene headless and classifies it (works / partial / unsupported / fails).
+- `tools/compare.py` builds contact sheets: render before, render after and the wallpaper's own preview.
+See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the workflow.
 
 ## Build
 `cargo build --release` -> `target/release/wallforge-render`
@@ -62,3 +87,17 @@ On failure: `{"ok":false,"error":..}` on stdout, message on stderr, exit 1.
 - A watchdog exits 1 if one decoder call takes >6 s (corrupt streams can hang ffmpeg/VAAPI).
 - Panic hook exits 1, except in the audio thread, which only loses audio.
 - Env: `WALLFORGE_DEBUG` (timing logs), `WALLFORGE_FFMPEG_LOG` (ffmpeg logs).
+
+## Web wallpapers (`wallforge/webplayer.py`)
+
+```
+python3 -m wallforge.webplayer --output DP-2 --bg <wallpaper dir> [--layer bottom|background] [--fps N]
+    [--silent | --volume N] [--mouse] [--set-property key=value]...
+python3 -m wallforge.webplayer --bg DIR --window 960x540 --screenshot out.png [--screenshot-time SECS]
+```
+
+A WebKit view (webkitgtk-6.0) on a gtk4-layer-shell surface anchored to one output. It loads the wallpaper's HTML
+file and provides the Wallpaper Engine web API: `wallpaperPropertyListener.applyUserProperties` and
+`applyGeneralProperties` are called with the wallpaper's properties (with your overrides), and
+`wallpaperRegisterAudioListener` callbacks receive silence. Clicks pass through to the desktop unless `--mouse` is
+given. The process is named `wallforge-web` so the app can find and stop it per output.
