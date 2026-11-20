@@ -37,7 +37,12 @@ const PT_PX: f32 = 2.5;
 /// Rasterise `text` into a w x h RGBA8 buffer (white, alpha = coverage). `k` = texture pixels per scene unit.
 pub fn raster(font: &fontdue::Font, d: &TextDef, text: &str, w: u32, h: u32, k: f32) -> Vec<u8> {
     let mut a = vec![0u8; (w * h) as usize];
-    let px = (d.pointsize * PT_PX * k).max(1.0);
+    // fonts with a tall line box (ascent+descent > 1 em) are drawn proportionally larger, matching the previews
+    let line_em = font.horizontal_line_metrics(100.0).map_or(1.0, |m| (m.ascent - m.descent) / 100.0).clamp(1.0, 2.0);
+    let mut px = (d.pointsize * PT_PX * line_em * k).max(1.0);
+    // text wider than its box is shrunk to fit instead of being clipped
+    let widest = |px: f32| text.split('\n').map(|l| l.chars().map(|c| font.metrics(c, px).advance_width).sum::<f32>()).fold(0.0f32, f32::max);
+    let lw = widest(px); if lw > w as f32 && lw > 0.0 { px = (px * w as f32 / lw * 0.98).max(1.0); }
     let lm = font.horizontal_line_metrics(px).unwrap_or(fontdue::LineMetrics { ascent: px * 0.8, descent: -px * 0.2, line_gap: 0.0, new_line_size: px });
     let lh = lm.new_line_size.max(px);
     let lines: Vec<&str> = text.split('\n').collect();
