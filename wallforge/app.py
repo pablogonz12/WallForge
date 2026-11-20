@@ -783,6 +783,12 @@ class Window(Adw.ApplicationWindow):
                 self.toasts.add_toast(Adw.Toast(title=f"{output}: could not restart the wallpaper"))
 
     def refresh_playing(self):
+        # The 3 s poll calls this constantly; skip the widget churn when nothing actually changed.
+        state = tuple((o["name"], engine.running(o["name"]), self.cfg.data["outputs"].get(o["name"], {}).get("id"),
+                       o["name"] in self._crashed) for o in monitors.outputs())
+        if state == getattr(self, "_play_state", None):
+            return
+        self._play_state = state
         child = self.play_box.get_first_child()
         while child:
             nxt = child.get_next_sibling()
