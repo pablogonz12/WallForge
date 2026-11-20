@@ -3,13 +3,15 @@ pkgname=wallforge-git
 _pkgname=wallforge
 pkgver=r0.0000000
 pkgrel=1
-pkgdesc='GTK4 front end for Wallpaper Engine wallpapers: library, settings, Workshop browser, per-monitor control'
+pkgdesc='Wallpaper Engine wallpapers on Wayland: native renderer for video, scene and web wallpapers, library, Workshop browser'
 arch=('x86_64' 'aarch64')
 url='https://github.com/pgm1207/wallforge'
 license=('MIT')
 depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'python-pillow' 'python-aiohttp' 'git' 'ffmpeg' 'libva' 'libglvnd')
 makedepends=('git' 'rust' 'clang')
-optdepends=('linux-wallpaperengine-git: the wallpaper engine itself (or another linux-wallpaperengine package)'
+optdepends=('webkitgtk-6.0: web wallpapers'
+            'gtk4-layer-shell: web wallpapers'
+            'linux-wallpaperengine-git: optional fallback engine for scenes'
             'steam: subscribe to Workshop wallpapers and fetch Wallpaper Engine assets'
             'matugen: palette sync'
             'wallust: palette sync'
