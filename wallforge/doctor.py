@@ -64,7 +64,7 @@ def _session() -> tuple[str, str]:
         dirs = [Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share"), Path("/usr/share"), Path("/usr/local/share")]
         if any((d / "gnome-shell/extensions" / uuid).is_dir() for d in dirs):
             return OK, f"{desktop}: no layer-shell, so WallForge draws through its GNOME extension (enable it: gnome-extensions enable {uuid})"
-        return BAD, f"{desktop} has no layer-shell: install the WallForge GNOME extension ({uuid}), or use KDE Plasma 6.7+, niri, Hyprland, Sway or river"
+        return BAD, f"{desktop} has no layer-shell: install the WallForge GNOME extension ({uuid}), or use KDE Plasma, niri, Hyprland, Sway or river"
     return OK, f"{desktop} on {kind or 'wayland'}"
 
 

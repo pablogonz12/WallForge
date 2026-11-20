@@ -9,7 +9,8 @@
   thumbnails. Settings > Setup has an "Install GNOME extension" button; `install.sh` and the packages ship it too.
   Tested on GNOME Shell 51 (video wallpapers); web wallpapers are not supported there yet.
 - Monitors are discovered through Mutter on GNOME, so the connector names match.
-- KDE Plasma 6.7+ is documented as supported (tested on KWin 6.8).
+- KDE Plasma is documented as supported (tested on KWin 6.8). Correction: KWin has implemented `wlr-layer-shell`
+  since Plasma 5.20, not 6.7 as 0.7.0's notes said.
 - **Discover sources**: a selector for Wallpaper Engine Workshop or **Wikimedia Commons** (free videos, public
   domain / CC0 / CC BY / CC BY-SA only, with licence and author on the card and detail page, and an attribution line
   saved in the project). `wallforge --commons` searches from the terminal.

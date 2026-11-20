@@ -146,7 +146,7 @@ Keyboard: `Ctrl+F` search · `Ctrl+R` random wallpaper · `Ctrl+Shift+N` rotate 
   | Desktop | How it draws | Tested |
   |---|---|---|
   | niri, Hyprland, Sway, river, Wayfire, labwc | `wlr-layer-shell` | niri |
-  | KDE Plasma 6.7+ | `wlr-layer-shell` (KWin implements it from that release) | KWin 6.8 |
+  | KDE Plasma (Wayland) | `wlr-layer-shell` (KWin has implemented it since Plasma 5.20) | KWin 6.8 |
   | GNOME 45+ | the bundled GNOME Shell extension (Settings > Setup > Install GNOME extension, or `install.sh`; log out and in once) | GNOME Shell 51, video wallpapers, headless |
 
   On GNOME, web wallpapers are not supported yet (the web player needs layer-shell), and the extension was not tested
@@ -309,7 +309,7 @@ but the file.
 the wallpaper's `project.json`, `scene.json` and its shaders, and draws them with GLES on a layer-shell surface. See
 [docs/comparison.md](docs/comparison.md) for how it compares, including where the other projects do better.
 
-**Will it work on GNOME or KDE?** KDE Plasma 6.7+: yes, KWin implements `wlr-layer-shell` from that release (tested on
+**Will it work on GNOME or KDE?** KDE Plasma: yes, KWin has implemented `wlr-layer-shell` since Plasma 5.20 (tested on
 KWin 6.8). GNOME 45+: yes, through the bundled shell extension, because GNOME has no layer-shell (tested on GNOME Shell
 51 with video wallpapers; web wallpapers do not work there yet). See [the table above](#requirements).
 
