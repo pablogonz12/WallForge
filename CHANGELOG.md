@@ -15,6 +15,12 @@
   default); optionally pause every wallpaper on battery and resume when you plug in.
 - Web wallpapers follow the reduced frame rate too.
 
+### Compatibility
+
+- Effects can now sample **another layer's rendered image** (`_rt_imageLayerComposite_*`), including layers that are
+  hidden in the scene. Shadow Keep's moon and the pixel-cyberpunk xray scene render their missing content instead of
+  a blurry or black area.
+
 ### Stability
 
 - **Crash watchdog**: a renderer that dies unexpectedly is restarted. After three restarts in five minutes the screen

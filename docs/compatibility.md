@@ -32,6 +32,7 @@ not listed here, please [report it](troubleshooting.md#reporting-a-wallpaper-tha
 | Solid colour layers, fullscreen and composition layers | Yes |
 | Layer blend modes | Normal, additive, multiply, screen; others draw as normal |
 | Effects (multi-pass, with their buffers and masks) | Yes, including Workshop effects that bring their own shaders |
+| Effects that sample another layer (render targets, `_rt_imageLayerComposite_*`) | Yes: the sampled layer is rendered first, hidden layers included. Compositing modes that depend on scene depth are still approximate |
 | Textures: RGBA, DXT1/3/5, RG88, R8, embedded PNG / JPEG / GIF, sprite sheets | Yes. Sprite-sheet scenes work even when the texture header's size disagrees with the stored mip |
 | GIF-template scenes (one animated sprite sheet filling the screen) | Yes |
 | Embedded video layers | Yes (their sound is not played) |
