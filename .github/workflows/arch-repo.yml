@@ -65,6 +65,7 @@ jobs:
           fi
           mkdir -p /tmp/pages/arch/x86_64
           cp packaging/arch-repo/*.pkg.tar.zst /tmp/pages/arch/x86_64/
+          rm -f /tmp/pages/arch/x86_64/wallforge-debug-*.pkg.tar.zst  # makepkg builds them; nobody installs them
           cp packaging/arch-repo/index.html /tmp/pages/index.html
           cp packaging/arch-repo/wallforge.conf /tmp/pages/arch/wallforge.conf
           cd /tmp/pages/arch/x86_64

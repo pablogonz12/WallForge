@@ -19,6 +19,7 @@ optdepends=('webkitgtk-6.0: web wallpapers'
 conflicts=('wallforge-git')
 source=()
 sha256sums=()
+options=('!debug')
 
 prepare() {
   # No source tarball: package the checkout the workflow built from, so the release tag and the
