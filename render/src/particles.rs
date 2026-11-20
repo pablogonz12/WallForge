@@ -131,12 +131,11 @@ fn parse_def(j: &Value, vfs: &Vfs, ov: &Ov, notes: &mut Vec<String>) -> Option<D
         }
     }
     if mat.combos.get("REFRACT").and_then(|v| fv(Some(v))).and_then(|v| v.first().copied()).unwrap_or(0.0) != 0.0 { notes.push("refraction material (system not drawn)".into()); return None; }
-    if arr("renderer").is_empty() { notes.push("no renderer (system not drawn)".into()); return None; }
     for r in arr("renderer") {
         match r.get("name").and_then(|v| v.as_str()).unwrap_or("") { "sprite" => {} o => notes.push(format!("renderer {o} drawn as sprite")) }
     }
     // instance overrides
-    d.life.min *= ov.life; d.life.max *= ov.life; d.size.min *= ov.size; d.size.max *= ov.size; d.alpha.min *= ov.alpha; d.alpha.max *= ov.alpha;
+    d.life.min *= ov.life; d.life.max *= ov.life; d.size.min *= ov.size * 0.5; d.size.max *= ov.size * 0.5; d.alpha.min *= ov.alpha; d.alpha.max *= ov.alpha;
     for k in 0..2 { for a in 0..3 { d.vel.0[k][a] *= ov.speed; d.col[k][a] *= ov.color[a]; } }
     if let Some(t) = &mut d.tvel { t.0 *= ov.speed; t.1 *= ov.speed; }
     d.emitters.iter_mut().for_each(|e| { e.smin *= ov.speed; e.smax *= ov.speed; });
