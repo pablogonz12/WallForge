@@ -66,6 +66,16 @@ impl Props {
     }
 }
 
+/// ids of invisible objects plus all their descendants (an invisible parent hides its children; children may precede parents in the file)
+fn hidden_ids(objs: &[Value], props: &Props) -> std::collections::HashSet<i64> {
+    let mut h: std::collections::HashSet<i64> = objs.iter().filter(|o| !props.boolean(o.get("visible"), true)).filter_map(|o| o.get("id").and_then(|v| v.as_i64())).collect();
+    loop {
+        let n = h.len();
+        for o in objs { if let (Some(id), Some(p)) = (o.get("id").and_then(|v| v.as_i64()), o.get("parent").and_then(|v| v.as_i64())) { if h.contains(&p) { h.insert(id); } } }
+        if h.len() == n { break h; }
+    }
+}
+
 pub fn floats(v: &Value) -> Option<Vec<f32>> {
     match v {
         Value::Number(n) => Some(vec![n.as_f64()? as f32]),
@@ -117,10 +127,11 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
     };
     let clear = v3(props.floats(g.get("clearcolor")), [0.0, 0.0, 0.0]);
     let mut objects = vec![];
+    let hidden = hidden_ids(j.get("objects").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]), &props);
     for o in j.get("objects").and_then(|v| v.as_array()).ok_or("scene.json: no objects")? {
         let name = o.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if !props.boolean(o.get("visible"), true) { continue; }
         let id = o.get("id").and_then(|v| v.as_i64()).unwrap_or(-1);
+        if hidden.contains(&id) { continue; }
         let kind = if let Some(i) = o.get("image").and_then(|v| v.as_str()) { Kind::Image { model: i.to_string() }
             } else if let Some(p) = o.get("particle").and_then(|v| v.as_str()) { Kind::Particle { file: p.to_string(), ov: o.get("instanceoverride").and_then(|v| v.as_object()).map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), props.floats(Some(v))?))).collect()).unwrap_or_default() }
             } else if let Some(s) = o.get("sound").and_then(|v| v.as_array()) { Kind::Sound { files: s.iter().filter_map(|x| x.as_str().map(String::from)).collect() }
