@@ -2,7 +2,7 @@
   "uuid": "wallforge@pgm1207.github.io",
   "name": "WallForge",
   "description": "Shows WallForge's live wallpapers (Wallpaper Engine video, scene and web wallpapers) behind your windows on GNOME. Needs the WallForge app: https://github.com/pgm1207/WallForge",
-  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "shell-version": ["51"],
   "url": "https://github.com/pgm1207/WallForge",
   "version-name": "0.8.0"
 }

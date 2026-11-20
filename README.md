@@ -152,10 +152,11 @@ Keyboard: `Ctrl+F` search · `Ctrl+R` random wallpaper · `Ctrl+Shift+N` rotate 
   |---|---|---|
   | niri, Hyprland, Sway, river, Wayfire, labwc | `wlr-layer-shell` | niri |
   | KDE Plasma (Wayland) | `wlr-layer-shell` (KWin has implemented it since Plasma 5.20) | KWin 6.8 |
-  | GNOME 45+ | the bundled GNOME Shell extension (Settings > Setup > Install GNOME extension, or `install.sh`; log out and in once) | GNOME Shell 51, video wallpapers, headless |
+  | GNOME 51 | the bundled GNOME Shell extension (Settings > Setup > Install GNOME extension, or `install.sh`; log out and in once) | GNOME Shell 51, video wallpapers, headless |
 
-  On GNOME, web wallpapers are not supported yet (the web player needs layer-shell), and the extension was not tested
-  on GNOME 45 to 50.
+  On GNOME, web wallpapers are not supported yet (the web player needs layer-shell), and the extension's `metadata.json`
+  lists only GNOME Shell 51, the one version it was tested on (older and newer versions are untested).
+  `make zip` (`tools/gnome-ext-zip.sh`) builds the extensions.gnome.org upload zip with `gnome-extensions pack`.
 - Python 3.11+, GTK 4, libadwaita 1.5+, PyGObject, Pillow, aiohttp, ffmpeg. For the renderer: Rust, clang, libva and
   EGL. For web wallpapers: `webkitgtk-6.0` and `gtk4-layer-shell`.
 - Steam, signed in to an account that owns Wallpaper Engine, to download Workshop wallpapers. Scene wallpapers also

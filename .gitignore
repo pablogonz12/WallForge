@@ -4,3 +4,4 @@ __pycache__/
 *.tmp
 wallforge/_build.py
 render/target
+dist/

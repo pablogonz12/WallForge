@@ -36,6 +36,7 @@ class Slot {
         this._owner = owner;
         this._bg = backgroundActor;
         this._clone = null;
+        this._destroyId = 0;
         this._box = new Clutter.Actor({
             layout_manager: new Clutter.BinLayout(),
             x_expand: true,
@@ -43,7 +44,8 @@ class Slot {
         });
         backgroundActor.layout_manager = new Clutter.BinLayout();
         backgroundActor.add_child(this._box);
-        this._box.connect('destroy', () => {
+        this._destroyId = this._box.connect('destroy', () => {
+            this._destroyId = 0;
             this._clone = null;
             this._owner.slots.delete(this);
         });
@@ -68,7 +70,14 @@ class Slot {
     }
 
     destroy() {
+        if (this._destroyId) {
+            this._box.disconnect(this._destroyId);
+            this._destroyId = 0;
+        }
+        this._clone?.destroy();
+        this._clone = null;
         this._box.destroy();
+        this._owner.slots.delete(this);
     }
 }
 
@@ -78,6 +87,10 @@ export default class WallForgeExtension extends Extension {
         this._injections = new InjectionManager();
         this._signals = [];
         this._refreshId = 0;
+        this._hideIds = new Set();
+        this._watched = new Map();   // Meta.Window -> {ids, unmanagedId}
+        this._actorIds = new Map();  // Meta.WindowActor -> 'destroy' handler id
+        this._stuck = new Set();     // windows this extension made sticky
         this._allWindowActors = () => global.get_window_actors();
 
         this._installOverrides();
@@ -97,14 +110,33 @@ export default class WallForgeExtension extends Extension {
         if (this._refreshId)
             GLib.source_remove(this._refreshId);
         this._refreshId = 0;
+        for (const id of this._hideIds)
+            GLib.source_remove(id);
+        this._hideIds.clear();
         for (const [obj, id] of this._signals)
             obj.disconnect(id);
         this._signals = [];
+        for (const win of [...this._watched.keys()])
+            this._unwatch(win);
+        for (const [actor, id] of this._actorIds)
+            actor.disconnect(id);
+        this._actorIds.clear();
+        for (const win of this._stuck) {
+            if (win.get_compositor_private())
+                win.unstick();
+        }
+        this._stuck.clear();
         for (const slot of [...this.slots])
             slot.destroy();
         this.slots.clear();
         this._injections.clear();
         this._injections = null;
+        this._allWindowActors = null;
+        this._watched = null;
+        this._actorIds = null;
+        this._hideIds = null;
+        this._stuck = null;
+        this.slots = null;
         Main.layoutManager._updateBackgrounds();
     }
 
@@ -140,7 +172,12 @@ export default class WallForgeExtension extends Extension {
         const win = actor.get_meta_window();
         if (!isRenderer(win))
             return;
-        actor.connect('destroy', () => this._scheduleRefresh());
+        if (!this._actorIds.has(actor)) {
+            this._actorIds.set(actor, actor.connect('destroy', () => {
+                this._actorIds?.delete(actor);
+                this._scheduleRefresh();
+            }));
+        }
         // Let the first frame reach the actor's texture before minimizing: a window minimized before it was ever
         // shown never gets one for the clone.
         this._scheduleHide(win);
@@ -149,9 +186,8 @@ export default class WallForgeExtension extends Extension {
 
     // Keep a renderer window out of sight: on every workspace, minimized, never above anything.
     _watch(win) {
-        if (!win || win._wallforgeWatched)
+        if (!win || this._watched.has(win))
             return;
-        win._wallforgeWatched = true;
         const ids = [
             win.connect('notify::title', () => {
                 if (isRenderer(win) && win.get_compositor_private())
@@ -166,11 +202,23 @@ export default class WallForgeExtension extends Extension {
                     win.unmake_above();
             }),
         ];
-        win.connect('unmanaged', () => ids.forEach(id => win.disconnect(id)));
+        const unmanagedId = win.connect('unmanaged', () => this._unwatch(win));
+        this._watched.set(win, {ids, unmanagedId});
+    }
+
+    _unwatch(win) {
+        const entry = this._watched?.get(win);
+        if (!entry)
+            return;
+        this._watched.delete(win);
+        for (const id of [...entry.ids, entry.unmanagedId])
+            win.disconnect(id);
+        this._stuck?.delete(win);
     }
 
     _scheduleHide(win) {
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
+            this._hideIds.delete(id);
             if (win.get_compositor_private()) {
                 // Mutter sizes a new window to the work area (minus the top bar); the wallpaper covers the monitor.
                 const m = win.get_monitor() >= 0 ? global.display.get_monitor_geometry(win.get_monitor()) : null;
@@ -181,11 +229,14 @@ export default class WallForgeExtension extends Extension {
             this._scheduleRefresh();
             return GLib.SOURCE_REMOVE;
         });
+        this._hideIds.add(id);
     }
 
     _hide(win) {
-        if (!win.is_on_all_workspaces())
+        if (!win.is_on_all_workspaces()) {
             win.stick();
+            this._stuck.add(win);
+        }
         if (win.above)
             win.unmake_above();
         if (!win.minimized)
