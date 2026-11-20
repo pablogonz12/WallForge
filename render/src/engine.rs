@@ -121,6 +121,7 @@ pub struct Engine {
     prov: HashMap<i64, usize>,          // scene object id -> layer index (render target producers)
     frame_state: Vec<u8>,               // per frame: 0 not rendered, 1 in progress (cycle guard), 2 done
     frame_tex: Vec<Option<(u32, i32, i32)>>,
+    frame_pre: Vec<Option<u32>>, // sampled layers: the finished image before export_layer (top-row-first, like every layer texture)
     audio: Option<crate::audiocap::Capture>,
     audio_tried: bool,
     spec: crate::audiocap::Snapshot,
@@ -184,7 +185,7 @@ impl Engine {
         }
         let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_pm: loc(prog, "pm"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
             vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, audio_dirty: false, vram: 0, notes: vec![], scene_rt: None, white: 0, black: 0,
-            out, screen: out, main_rt: None, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], texts: vec![], parts: Default::default(), prov: HashMap::new(), frame_state: vec![], frame_tex: vec![],
+            out, screen: out, main_rt: None, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], texts: vec![], parts: Default::default(), prov: HashMap::new(), frame_state: vec![], frame_tex: vec![], frame_pre: vec![],
             audio: None, audio_tried: false, spec: crate::audiocap::Snapshot::ZERO };
         e.rebuild();
         Ok(e)
@@ -643,7 +644,7 @@ impl Engine {
         self.parts.step(t);
         let nlayers = self.layers.len();
         self.frame_state.clear(); self.frame_state.resize(nlayers, 0);
-        self.frame_tex.clear(); self.frame_tex.resize(nlayers, None);
+        self.frame_tex.clear(); self.frame_tex.resize(nlayers, None); self.frame_pre.clear(); self.frame_pre.resize(nlayers, None);
         for li in 0..nlayers {
             // a layer's effect chain leaves its own FBO/viewport bound; particles need the frame target again
             if self.parts.is_empty() == false { unsafe { gl::BindFramebuffer(gl::FRAMEBUFFER, rt_fbo); gl::Viewport(0, 0, self.out.0, self.out.1); } }
@@ -651,7 +652,7 @@ impl Engine {
             let (full, has_ping) = (self.layers[li].full, self.layers[li].ping.is_some());
             if self.layers[li].hidden { continue; } // render-target producer: drawn on demand by its consumers
             if full && !has_ping { continue; }
-            let src_tex = self.ensure(li, t).0;
+            let src_tex = { let e = self.ensure(li, t).0; self.frame_pre.get(li).copied().flatten().unwrap_or(e) }; // a sampled layer's export is scene-space bottom-up: draw its own image instead
             let l = &self.layers[li];
             let mvp = scene::mul(&self.view, &l.world);
             let mvp = if l.full { scene::ident() } else { mvp };
@@ -733,6 +734,7 @@ impl Engine {
     /// Returns the texture holding the layer's image plus its size.
     fn ensure(&mut self, li: usize, t: f32) -> (u32, i32, i32) {
         if self.frame_state.len() <= li { self.frame_state.resize(li + 1, 0); self.frame_tex.resize(li + 1, None); }
+        if self.frame_pre.len() <= li { self.frame_pre.resize(li + 1, None); }
         if let Some(v) = self.frame_tex[li] { return v; }
         if self.frame_state[li] == 1 {
             // sampling cycle: fall back to the producer's own texture
@@ -743,6 +745,7 @@ impl Engine {
         let l0 = &self.layers[li];
         let src = if l0.full && !l0.composite { self.scene_rt.as_ref().map(|r| r.tex) } else { None };
         let r = self.render_effects(li, t, src);
+        self.frame_pre[li] = Some(r.0);
         let r = if self.layers[li].sampled { self.export_layer(li, r.0, t) } else { r };
         self.frame_state[li] = 2;
         self.frame_tex[li] = Some(r);
