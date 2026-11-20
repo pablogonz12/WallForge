@@ -264,7 +264,7 @@ impl Engine {
                 let (w, at) = (if hid { scene::ident() } else { world_of(&self.scene.objects, i, 0) }, self.layers.len());
                 self.parts.add(&self.vfs, file, ov, w, at, s3tc, i as u64); self.animated |= !self.parts.is_empty(); continue;
             }
-            if let Kind::Text(td) = &o.kind { if hid { continue; } let td = (**td).clone(); self.add_text(i, td, sx, sy); continue; }
+            if let Kind::Text(td) = &o.kind { if hid { continue; } let td = (**td).clone(); self.add_text(i, td, sx, sy, &mut cache, s3tc, &mut pool); continue; }
             let (name, model, size_o, scale, color, alpha, blend_o) = {
                 let Kind::Image { model } = &o.kind else { continue };
                 (o.name.clone(), model.clone(), o.size, o.scale, o.color, o.alpha, o.blend.clone())
@@ -302,48 +302,10 @@ impl Engine {
             let mut layer = Layer { name: name.clone(), tex: gt.id, size, world, color, alpha, uvs: gt.uv, frames, tex_wh, full, blend: blend_of(blend_o.as_deref().unwrap_or(&def.material.blending)),
                 passes: vec![], ping: None, rt: None, named: HashMap::new(), px, id: o.id, hidden: hid, sampled, composite: false };
             if def.material.blending == "additive" { layer.blend = Blend::Additive; }
-            // effects
-            let effects: Vec<_> = o.effects.iter().map(|e| (e.file.clone(), e.name.clone(), e.passes.iter().map(|p| (p.constants.clone(), p.textures.clone(), p.combos.clone())).collect::<Vec<_>>())).collect();
-            let mut fbo_div: HashMap<String, f32> = HashMap::new();
-            let effects: Vec<_> = effects.into_iter().take(std::env::var("WF_MAXFX").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX)).collect();
-            let only: Option<usize> = std::env::var("WF_ONLYFX").ok().and_then(|v| v.parse().ok()); let effects: Vec<_> = effects.into_iter().enumerate().filter(|(i, _)| only.map_or(true, |o| o == *i)).map(|x| x.1).collect();
-            for (file, ename, ovs) in effects {
-                let Some(ed) = scene::load_effect(&self.vfs, &file) else { self.note(format!("layer '{name}': effect {file} not found, skipped")); continue };
-                for f in &ed.fbos { fbo_div.insert(f.name.clone(), f.scale.max(1.0)); }
-                let mut built = vec![];
-                let mut ok = true;
-                for (pi, ep) in ed.passes.iter().enumerate() {
-                    match self.build_pass(&ename, ep, ovs.get(pi), &mut cache, s3tc, (px.0 as u32, px.1 as u32)) { Ok(p) => built.push(p), Err(e) => { self.note(format!("layer '{name}': effect {file} pass {pi}: {e}; effect skipped")); ok = false; break; } }
-                }
-                if ok { layer.passes.extend(built); }
-            }
-            layer.composite = full && layer.passes.iter().any(|p| p.binds.iter().any(|(_, n)| n != "previous" && !layer.named.contains_key(n) && rt_layer_id(n).is_some()));
+            self.build_effects(&o, &mut layer, full, &mut cache, s3tc, &mut pool);
             if sampled {
                 let rt = Target::new(self.out.0.max(1), self.out.1.max(1));
                 self.vram += rt.bytes(); layer.rt = Some(rt);
-            }
-            if !layer.passes.is_empty() {
-                let (w, h) = (px.0.clamp(1, 4096), px.1.clamp(1, 4096));
-                let mut vram = 0usize;
-                let mut grab = |slot: usize, tw: i32, th: i32, vram: &mut usize| -> Target {
-                    if sampled { let t = Target::new(tw, th); *vram += t.bytes(); t }
-                    else { *pool.entry((tw, th, slot)).or_insert_with(|| { let t = Target::new(tw, th); *vram += t.bytes(); t }) }
-                };
-                let (a, b) = (grab(0, w as i32, h as i32, &mut vram), grab(1, w as i32, h as i32, &mut vram));
-                layer.ping = Some((a, b));
-                for p in &layer.passes {
-                    if let Some(t) = &p.target {
-                        if !layer.named.contains_key(t) {
-                            let d = fbo_div.get(t).copied().unwrap_or(1.0);
-                            let slot = 2 + layer.named.len();
-                            let tg = grab(slot, ((w as f32 / d) as i32).max(1), ((h as f32 / d) as i32).max(1), &mut vram);
-                            if std::env::var("WF_DBG").is_ok() { eprintln!("vram: fbo {t} {}x{}", tg.w, tg.h); }
-                            layer.named.insert(t.clone(), tg);
-                        }
-                    }
-                    if p.time { self.animated = true; }
-                }
-                self.vram += vram;
             }
             if hid || sampled { if std::env::var("WF_DBG").is_ok() { eprintln!("rt: layer {} '{name}' {}x{} hidden={hid} sampled={sampled} passes={}", o.id, px.0, px.1, layer.passes.len()); } }
             let li = self.layers.len();
@@ -453,10 +415,55 @@ impl Engine {
         Ok(Pass { prog, uniforms, values, uvr, textures, binds, target: ep.target.clone(), time: tr.uses_time })
     }
 
+    /// Builds `o`'s effect chain into `layer` and allocates its ping-pong / named buffers.
+    /// Shared by image and text layers: the layer's own texture is the chain's input.
+    fn build_effects(&mut self, o: &scene::Obj, layer: &mut Layer, full: bool,
+                     cache: &mut HashMap<String, Option<GlTex>>, s3tc: bool, pool: &mut HashMap<(i32, i32, usize), Target>) {
+        let (name, px, sampled) = (layer.name.clone(), layer.px, layer.sampled);
+        let effects: Vec<_> = o.effects.iter().map(|e| (e.file.clone(), e.name.clone(), e.passes.iter().map(|p| (p.constants.clone(), p.textures.clone(), p.combos.clone())).collect::<Vec<_>>())).collect();
+        let mut fbo_div: HashMap<String, f32> = HashMap::new();
+        let effects: Vec<_> = effects.into_iter().take(std::env::var("WF_MAXFX").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX)).collect();
+        let only: Option<usize> = std::env::var("WF_ONLYFX").ok().and_then(|v| v.parse().ok()); let effects: Vec<_> = effects.into_iter().enumerate().filter(|(i, _)| only.map_or(true, |o| o == *i)).map(|x| x.1).collect();
+        for (file, ename, ovs) in effects {
+            let Some(ed) = scene::load_effect(&self.vfs, &file) else { self.note(format!("layer '{name}': effect {file} not found, skipped")); continue };
+            for f in &ed.fbos { fbo_div.insert(f.name.clone(), f.scale.max(1.0)); }
+            let mut built = vec![];
+            let mut ok = true;
+            for (pi, ep) in ed.passes.iter().enumerate() {
+                match self.build_pass(&ename, ep, ovs.get(pi), cache, s3tc, (px.0 as u32, px.1 as u32)) { Ok(p) => built.push(p), Err(e) => { self.note(format!("layer '{name}': effect {file} pass {pi}: {e}; effect skipped")); ok = false; break; } }
+            }
+            if ok { layer.passes.extend(built); }
+        }
+        layer.composite = full && layer.passes.iter().any(|p| p.binds.iter().any(|(_, n)| n != "previous" && !layer.named.contains_key(n) && rt_layer_id(n).is_some()));
+        if layer.passes.is_empty() { return; }
+        let (w, h) = (px.0.clamp(1, 4096), px.1.clamp(1, 4096));
+        let mut vram = 0usize;
+        let mut grab = |slot: usize, tw: i32, th: i32, vram: &mut usize| -> Target {
+            if sampled { let t = Target::new(tw, th); *vram += t.bytes(); t }
+            else { *pool.entry((tw, th, slot)).or_insert_with(|| { let t = Target::new(tw, th); *vram += t.bytes(); t }) }
+        };
+        let (a, b) = (grab(0, w as i32, h as i32, &mut vram), grab(1, w as i32, h as i32, &mut vram));
+        layer.ping = Some((a, b));
+        for p in &layer.passes {
+            if let Some(t) = &p.target {
+                if !layer.named.contains_key(t) {
+                    let d = fbo_div.get(t).copied().unwrap_or(1.0);
+                    let slot = 2 + layer.named.len();
+                    let tg = grab(slot, ((w as f32 / d) as i32).max(1), ((h as f32 / d) as i32).max(1), &mut vram);
+                    if std::env::var("WF_DBG").is_ok() { eprintln!("vram: fbo {t} {}x{}", tg.w, tg.h); }
+                    layer.named.insert(t.clone(), tg);
+                }
+            }
+            if p.time { self.animated = true; }
+        }
+        self.vram += vram;
+    }
+
     /// Stage-2 hook: audio spectrum / particle simulation step goes here.
     /// Text layer for scene object `i` (rasterised with the layer's on-screen pixel size).
-    fn add_text(&mut self, i: usize, td: crate::text::TextDef, sx: f32, sy: f32) {
-        let o = &self.scene.objects[i];
+    fn add_text(&mut self, i: usize, td: crate::text::TextDef, sx: f32, sy: f32,
+                cache: &mut HashMap<String, Option<GlTex>>, s3tc: bool, pool: &mut HashMap<(i32, i32, usize), Target>) {
+        let o = self.scene.objects[i].clone();
         let Some(size) = o.size else { return };
         let (name, scale, color, alpha, align, obj_id) = (o.name.clone(), o.scale, o.color, o.alpha.clamp(0.0, 1.0), o.align, o.id);
         let px = ((size[0] * scale[0].abs() * sx).ceil().max(1.0) as i32, (size[1] * scale[1].abs() * sy).ceil().max(1.0) as i32);
@@ -465,7 +472,18 @@ impl Engine {
         let vfs = &self.vfs;
         let (live, missing) = crate::text::Live::new(td, &|p| vfs.read(p), px.0.clamp(1, 4096) as u32, px.1.clamp(1, 4096) as u32, (sx * scale[0].abs()).max(1e-3), self.layers.len());
         if let Some(f) = missing { if !self.notes.iter().any(|n| n.contains(&f)) { self.note(format!("text '{name}': font '{f}' not found, using a fallback font")); } }
-        let layer = Layer { name, tex: live.tex, size, world, color, alpha, uvs: [1.0, 1.0], frames: vec![], tex_wh: (1.0, 1.0), full: false, blend: Blend::Alpha, passes: vec![], ping: None, rt: None, named: HashMap::new(), px, id: obj_id, hidden: false, sampled: false, composite: false };
+        let mut layer = Layer { name: name.clone(), tex: live.tex, size, world, color, alpha, uvs: [1.0, 1.0], frames: vec![], tex_wh: (1.0, 1.0), full: false, blend: Blend::Alpha, passes: vec![], ping: None, rt: None, named: HashMap::new(), px, id: obj_id, hidden: false, sampled: false, composite: false };
+        if !o.effects.is_empty() {
+            // A text layer cannot produce a scene-space target for other chains to sample (no `rt`), and
+            // hidden producers are not built here: skip such chains instead of rendering them wrong once.
+            let mut refs = vec![];
+            rt_refs(&self.vfs, &o, &mut refs);
+            if refs.is_empty() {
+                self.build_effects(&o, &mut layer, false, cache, s3tc, pool);
+            } else {
+                self.note(format!("text '{name}': effect chain samples another layer's render target, effects skipped"));
+            }
+        }
         self.texts.push(live); self.layers.push(layer);
     }
     /// Refreshes time-driven text (checked at most once a second); true when something changed and a redraw is needed.
