@@ -1,4 +1,4 @@
-"""WallForge: GTK4 / libadwaita front end for linux-wallpaperengine."""
+"""WallForge: GTK4 / libadwaita app that plays Wallpaper Engine wallpapers with its own renderer."""
 from __future__ import annotations
 
 import hashlib
@@ -567,7 +567,7 @@ class Window(Adw.ApplicationWindow):
             engine.start(self.cfg, it, o, legacy=True)
         except Exception:
             return False
-        self.toasts.add_toast(Adw.Toast(title=f"{o}: native renderer stopped, switched to the classic engine"))
+        self.toasts.add_toast(Adw.Toast(title=f"{o}: renderer stopped, switched to linux-wallpaperengine"))
         GLib.timeout_add_seconds(3, self._check_crash, [o])
         return True
 
@@ -1085,23 +1085,19 @@ class Window(Adw.ApplicationWindow):
         c = self.cfg.data
 
         # --- setup
-        gs = Adw.PreferencesGroup(title="Setup", description="Video wallpapers need nothing else. Scene and web wallpapers still need the classic engine and "
-                                  "Wallpaper Engine's assets until the native renderer covers them. You must own Wallpaper Engine on Steam, "
-                                  "but you do not have to install it.")
+        gs = Adw.PreferencesGroup(title="Setup", description="WallForge plays video, scene and web wallpapers itself. Scene wallpapers "
+                                  "also need Wallpaper Engine's assets: you must own Wallpaper Engine on Steam, but you do not have to install it.")
         pg.add(gs)
-        eng = paths.find_engine(c["engine_dir"])
-        r_eng = Adw.ActionRow(title="Classic engine (linux-wallpaperengine), for scenes", subtitle=str(eng) if eng else
-                              "Not found. Only needed for scene and web wallpapers. Install linux-wallpaperengine from your package manager or the AUR.")
-        r_eng.add_prefix(Gtk.Image(icon_name="emblem-ok-symbolic" if eng else "dialog-warning-symbolic"))
-        gs.add(r_eng)
         rn = paths.find_render()
-        r_nat = Adw.SwitchRow(title="Native renderer (beta)", active=c.get("renderer", "native") == "native",
-                              subtitle="On by default. Plays video wallpapers with WallForge's own Rust renderer (hardware decode, no extra "
-                              "engine needed). Scene wallpapers still use linux-wallpaperengine." +
-                              (f" Found: {rn}" if rn else " Not built yet."))
-        r_nat.set_sensitive(bool(rn))
-        r_nat.connect("notify::active", lambda rr, _p: (c.update(renderer="native" if rr.get_active() else "legacy"), self.cfg.save()))
+        r_nat = Adw.ActionRow(title="Renderer", subtitle=_tilde(rn) if rn else "Not built yet. Build it below, or run ./install.sh.")
+        r_nat.add_prefix(Gtk.Image(icon_name="object-select-symbolic" if rn else "dialog-warning-symbolic"))
         gs.add(r_nat)
+        eng = paths.find_engine(c["engine_dir"])
+        if eng:  # optional fallback, only worth showing to people who have it installed
+            r_eng = Adw.SwitchRow(title="Use linux-wallpaperengine instead", active=c.get("renderer", "native") == "legacy",
+                                  subtitle=f"Optional fallback for scenes, found at {_tilde(eng)}. Off: WallForge's own renderer plays everything.")
+            r_eng.connect("notify::active", lambda rr, _p: (c.update(renderer="legacy" if rr.get_active() else "native"), self.cfg.save()))
+            gs.add(r_eng)
         src = paths.render_source()
         if not rn and src and shutil.which("cargo"):
             r_b = Adw.ActionRow(title="Build the native renderer", subtitle="Runs cargo build --release (a few minutes the first time).")
@@ -1127,8 +1123,8 @@ class Window(Adw.ApplicationWindow):
             r_b.add_suffix(b_b)
             gs.add(r_b)
         ap = paths.find_assets(c["assets_dir"])
-        r_as = Adw.ActionRow(title="Wallpaper Engine assets", subtitle=str(ap) if ap else "Not found")
-        r_as.add_prefix(Gtk.Image(icon_name="emblem-ok-symbolic" if ap else "dialog-warning-symbolic"))
+        r_as = Adw.ActionRow(title="Wallpaper Engine assets", subtitle=_tilde(ap) if ap else "Not found")
+        r_as.add_prefix(Gtk.Image(icon_name="object-select-symbolic" if ap else "dialog-warning-symbolic"))
         gs.add(r_as)
         if not ap:
             r_dl = Adw.ActionRow(title="Fetch assets from Steam (about 85 MB)",
@@ -1491,6 +1487,12 @@ def restore(cfg: config.Config) -> int:
             except Exception as e:
                 print(f"{out}: {e}", file=sys.stderr)
     return n
+
+
+def _tilde(p) -> str:
+    """A path for display, with the home folder shortened to ~."""
+    s, home = str(p), str(Path.home())
+    return "~" + s[len(home):] if s == home or s.startswith(home + "/") else s
 
 
 def main():

@@ -1,30 +1,33 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 ### New
 
-- Settings > Updates > **Check my setup** runs the setup check in a dialog and copies its report; `wallforge --doctor` checks Wayland, GTK, layer-shell, the renderer build, Wallpaper Engine assets, the Workshop
-  library, ffmpeg/VAAPI and WebKit, then prints what to fix. Read-only, works without a display, exits 1 on failures.
-- `tools/bench.sh <workshop-id>` reproduces the performance table: GPU, CPU, RSS and scene texture memory per
-  wallpaper, against an idle baseline.
-- `docs/comparison.md` places WallForge next to other ways of playing Wallpaper Engine content on Linux, including
-  where the others are ahead.
+- **Install with pacman**: every release is built in an Arch container and published to a pacman repository on
+  GitHub Pages, so `sudo pacman -Sy wallforge` installs and updates it. The AUR recipe is ready for when AUR
+  registration reopens.
+- **Check my setup** (Settings > Updates) and `wallforge --doctor`: one read-only check of Wayland, GTK,
+  layer-shell, the renderer, Wallpaper Engine assets, the Workshop library, ffmpeg/VAAPI, WebKit, the config and the
+  last run's log, with what to fix. Works without a display; exits 1 on failures.
+- **Copy diagnostics** (Settings > Updates): version, GPU, the selected wallpaper's renderer report and its log, ready
+  to paste into an issue.
+- `tools/bench.sh <workshop-id>` reproduces the README's performance table on your machine, against an idle baseline.
+
+### Changed
+
+- Settings > Setup describes the app as it is: WallForge's own renderer plays video, scene and web wallpapers. The
+  linux-wallpaperengine row only appears when it is installed, as an optional fallback switch. Status icons render
+  on every icon theme, and paths are shown relative to your home folder.
 
 ### Documentation
 
-- README rebuilt around what a visitor needs first: a one-command install, a contents bar, a measured performance
-  table, a FAQ, supported-desktop and keyboard-shortcut lists, and the packaging routes that actually exist today.
-  Fixed two claims that were no longer true (the "View log" path and the video CPU figure).
-- New `SECURITY.md` (private vulnerability reporting, scope, what is not a vulnerability) and a short
-  `CODE_OF_CONDUCT.md`; issue forms now ask for `wallforge --doctor` and **Copy diagnostics** output instead of a
-  free-form log paste.
-
-- README: demo animation from the renderer, real screenshots, measured performance with the command that reproduces
-  it, and a five-line install.
-- **Arch repository**: `arch-repo.yml` builds and publishes a package to a pacman repository on gh-pages on every
-  release, so `sudo pacman -Sy wallforge` installs and updates it. The AUR package is prepared as well (`.SRCINFO`,
-  publish steps in `packaging/aur/README.md`); AUR registration is currently closed by the AUR team.
+- README rebuilt: one-command install, demo animation, measured performance, FAQ, supported desktops, keyboard
+  shortcuts, roadmap. Two stale claims fixed.
+- New `docs/comparison.md`, `SECURITY.md` and `CODE_OF_CONDUCT.md`; issue forms ask for `--doctor` and Copy
+  diagnostics output.
+- `tools/ui_screenshots.sh` regenerates the README screenshots off-screen (GTK Broadway), without touching your
+  desktop or your wallpapers.
 
 ## 0.6.0
 

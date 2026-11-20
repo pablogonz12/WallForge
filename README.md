@@ -13,7 +13,7 @@
 <p align="center"><img src="assets/demo.gif" alt="A scene wallpaper with a fluid-simulation effect, rendered live by WallForge" width="760"></p>
 
 <p align="center"><sub>Recorded from the renderer: a Wallpaper Engine scene with a multi-pass fluid simulation, no post-processing.<br>
-<a href="https://github.com/pgm1207/WallForge/releases/download/v0.6.0/demo.mp4">Same clip as video (mp4, 5 s)</a></sub></p>
+<a href="https://github.com/pgm1207/WallForge/releases/download/v0.7.0/demo.mp4">Same clip as video (mp4, 5 s)</a></sub></p>
 
 **WallForge** is a GTK4 / libadwaita app *and* the renderer behind it. It plays the
 [Wallpaper Engine](https://store.steampowered.com/app/431960/) wallpapers you already own on any Wayland desktop with
@@ -35,7 +35,7 @@ Engine on Steam for the Workshop library and its shared assets; WallForge never 
 
 **Contents** · [Why](#why-wallforge) · [What it plays](#what-it-plays) · [Screenshots](#screenshots) ·
 [Performance](#performance) · [Rotation](#rotation) · [Features](#features) · [Install](#install) ·
-[FAQ](#faq) · [Troubleshooting](#when-a-wallpaper-looks-wrong) · [Documentation](#more-documentation)
+[FAQ](#faq) · [Roadmap](#roadmap) · [Troubleshooting](#when-a-wallpaper-looks-wrong) · [Documentation](#more-documentation)
 
 ## Why WallForge
 
@@ -63,9 +63,16 @@ still approximate, is in [docs/compatibility.md](docs/compatibility.md).
 
 ## Screenshots
 
-<img src="assets/screenshot-library.jpg" alt="The WallForge library with cover art for every subscribed wallpaper" width="100%">
-
-<img src="assets/screenshot-settings.jpg" alt="Settings: playback, rotation, render resolution, battery saving, effects" width="100%">
+<table>
+<tr>
+<td width="50%"><img src="assets/screenshot-library.jpg" alt="The WallForge library: cover art, type badges, search, filters and sort"></td>
+<td width="50%"><img src="assets/screenshot-settings.jpg" alt="Settings: setup status, content filters, playback"></td>
+</tr>
+<tr>
+<td align="center"><sub>Library: everything you subscribed to, with search, filters and favourites</sub></td>
+<td align="center"><sub>Settings: setup status at a glance, then playback, rotation, power and desktop</sub></td>
+</tr>
+</table>
 
 ## Performance
 
@@ -292,6 +299,19 @@ for that wallpaper and the last log lines on the clipboard in one click.
 Logs live at `$XDG_RUNTIME_DIR/wallforge/<output>.log`, and the crash toast has a **View log** button.
 `wallforge --doctor` checks the setup itself, and [docs/troubleshooting.md](docs/troubleshooting.md) covers the common
 problems.
+
+## Roadmap
+
+What is next, roughly in order. Each item has an issue; a thumbs-up there is how priorities get decided.
+
+- [**Sound layers**](https://github.com/pgm1207/WallForge/issues/2): 25 of the 77 scenes in our test library carry sound objects that are silent today.
+- [**SceneScript**](https://github.com/pgm1207/WallForge/issues/3): run the scripts scenes use for clocks, media panels and scripted camera moves.
+- [**Puppet (mesh) animation**](https://github.com/pgm1207/WallForge/issues/4) for character scenes.
+- [**Bloom and HDR**](https://github.com/pgm1207/WallForge/issues/5) post-processing matching Wallpaper Engine's look.
+- [**More packages**](https://github.com/pgm1207/WallForge/issues/6): AUR (waiting on AUR registration), Flatpak, Fedora COPR.
+
+Contributions are welcome, from a Workshop link that renders wrong to a renderer fix; [CONTRIBUTING.md](CONTRIBUTING.md)
+shows how to test a change against your whole library in one command.
 
 ## More documentation
 
