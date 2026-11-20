@@ -10,8 +10,11 @@ Wallpaper Engine; see [Reporting a wallpaper](docs/troubleshooting.md#reporting-
 | `wallforge/` | The GTK4 / libadwaita app (Python). `app.py` is the window, `engine.py` starts and stops players, `library.py` scans wallpapers, `workshop.py` talks to the Steam Workshop, `weimport.py` reads Wallpaper Engine's `config.json`, `webplayer.py` is the WebKit player for web wallpapers. |
 | `render/` | `wallforge-render`, the Rust renderer for video and scene wallpapers. See [`render/README.md`](render/README.md). |
 | `render/tools/` | `batch.py` renders your whole library headless; `compare.py` builds contact sheets against the previews. |
+| `tools/bench.sh` | Measures GPU, CPU, memory and scene texture use per wallpaper, against an idle baseline; reproduces the table in the README. |
+| `tests/` | Python unit tests for rotation, config migrations and the setup check: `python3 -m unittest discover -s tests`. |
 | `docs/` | User documentation. |
-| `packaging/aur/` | PKGBUILD. |
+| `packaging/aur/` | The AUR recipe (`wallforge-git`). |
+| `packaging/arch-repo/` | The release recipe and the pacman repository layout published to gh-pages. |
 
 ## Running from a checkout
 

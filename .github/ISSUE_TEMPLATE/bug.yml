@@ -12,8 +12,10 @@ body:
   - type: textarea
     id: output
     attributes:
-      label: Terminal output
-      description: Start WallForge from a terminal (`./wallforge.sh`) and paste anything it prints.
+      label: Diagnostics
+      description: >-
+        `wallforge --doctor` prints a setup report (paste it whole). Settings > Updates > Copy diagnostics adds the
+        selected wallpaper's renderer report and log. Anything the terminal prints when you start the app helps too.
       render: text
   - type: input
     id: system

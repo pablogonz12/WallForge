@@ -13,6 +13,13 @@
 
 ### Documentation
 
+- README rebuilt around what a visitor needs first: a one-command install, a contents bar, a measured performance
+  table, a FAQ, supported-desktop and keyboard-shortcut lists, and the packaging routes that actually exist today.
+  Fixed two claims that were no longer true (the "View log" path and the video CPU figure).
+- New `SECURITY.md` (private vulnerability reporting, scope, what is not a vulnerability) and a short
+  `CODE_OF_CONDUCT.md`; issue forms now ask for `wallforge --doctor` and **Copy diagnostics** output instead of a
+  free-form log paste.
+
 - README: demo animation from the renderer, real screenshots, measured performance with the command that reproduces
   it, and a five-line install.
 - **Arch repository**: `arch-repo.yml` builds and publishes a package to a pacman repository on gh-pages on every
@@ -57,6 +64,13 @@
 
 ### Documentation
 
+- README rebuilt around what a visitor needs first: a one-command install, a contents bar, a measured performance
+  table, a FAQ, supported-desktop and keyboard-shortcut lists, and the packaging routes that actually exist today.
+  Fixed two claims that were no longer true (the "View log" path and the video CPU figure).
+- New `SECURITY.md` (private vulnerability reporting, scope, what is not a vulnerability) and a short
+  `CODE_OF_CONDUCT.md`; issue forms now ask for `wallforge --doctor` and **Copy diagnostics** output instead of a
+  free-form log paste.
+
 - README: "Performance and battery" section; renderer README documents `--scale`.
 - `.coderabbit.yaml` so pull requests are reviewed by CodeRabbit with project-specific hints.
 
@@ -91,6 +105,13 @@ The app is now called **WallForge**. Commands, paths and the app id are unchange
 - "Disable particles" in Settings now applies to the native renderer.
 
 ### Documentation
+
+- README rebuilt around what a visitor needs first: a one-command install, a contents bar, a measured performance
+  table, a FAQ, supported-desktop and keyboard-shortcut lists, and the packaging routes that actually exist today.
+  Fixed two claims that were no longer true (the "View log" path and the video CPU figure).
+- New `SECURITY.md` (private vulnerability reporting, scope, what is not a vulnerability) and a short
+  `CODE_OF_CONDUCT.md`; issue forms now ask for `wallforge --doctor` and **Copy diagnostics** output instead of a
+  free-form log paste.
 
 - README rewritten; new guides for compatibility, importing, troubleshooting and contributing; issue templates.
 - `render/tools/compare.py` builds contact sheets of renders against the wallpapers' previews.

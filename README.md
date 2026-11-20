@@ -17,25 +17,32 @@
 
 **WallForge** is a GTK4 / libadwaita app *and* the renderer behind it. It plays the
 [Wallpaper Engine](https://store.steampowered.com/app/431960/) wallpapers you already own on any Wayland desktop with
-layer-shell support — niri, Hyprland, Sway, river — and it manages them: search, per-wallpaper settings, audio,
-rotation, palette sync.
+layer-shell support, and it manages them: search, per-wallpaper settings, audio, rotation, palette sync.
 
 ```bash
-# Arch / CachyOS
-sudo pacman -S python-gobject gtk4 libadwaita python-pillow python-aiohttp ffmpeg libva rust clang \
-               webkitgtk-6.0 gtk4-layer-shell
-git clone https://github.com/pgm1207/WallForge && cd WallForge && ./install.sh && ./wallforge.sh
+# Arch / CachyOS: install the package, then run it
+sudo tee /etc/pacman.d/wallforge.conf >/dev/null <<'EOF'
+[wallforge]
+SigLevel = Optional
+Server = https://pgm1207.github.io/WallForge/arch/x86_64
+EOF
+grep -q wallforge.conf /etc/pacman.conf || echo 'Include = /etc/pacman.d/wallforge.conf' | sudo tee -a /etc/pacman.conf
+sudo pacman -Sy wallforge && wallforge
 ```
 
-You need to own Wallpaper Engine on Steam (for the Workshop library and its shared assets); WallForge never ships or
-redistributes its files.
+Everywhere else, [build from source](#from-source): it takes about a minute of compiling. You need to own Wallpaper
+Engine on Steam for the Workshop library and its shared assets; WallForge never ships or redistributes its files.
+
+**Contents** · [Why](#why-wallforge) · [What it plays](#what-it-plays) · [Screenshots](#screenshots) ·
+[Performance](#performance) · [Rotation](#rotation) · [Features](#features) · [Install](#install) ·
+[FAQ](#faq) · [Troubleshooting](#when-a-wallpaper-looks-wrong) · [Documentation](#more-documentation)
 
 ## Why WallForge
 
 | | |
 |---|---|
 | **One app, not a pile** | Library, settings, Discover, share links and the renderer in a single GTK4 window. Nothing else to install or configure. |
-| **Light by design** | One small Rust process per screen. Still scenes are drawn once and then sleep. A 4K video wallpaper costs about 2% of one CPU core. |
+| **Light by design** | One small Rust process per screen, speaking Wayland and GLES directly. A still scene is drawn once and then sleeps; a 4K video wallpaper costs about 1% of one CPU core. |
 | **Looks right by default** | Auto fit fills the screen (ultrawide art is cropped) and keeps portrait art whole. No stretched wallpapers. |
 | **Brings your setup along** | Imports your Wallpaper Engine `config.json`: per-wallpaper properties, volumes, frame rate limit, fullscreen rule. |
 | **Plays the hard ones** | Multi-pass effects, layer render targets, particles, embedded video, text with glow/outline, audio-reactive visualisers. |
@@ -44,8 +51,8 @@ redistributes its files.
 ## What it plays
 
 Every scene wallpaper in our test library (77 installed Workshop scenes) starts with nothing skipped, except one 3D
-scene, which WallForge detects and refuses instead of showing a black screen. The full matrix, including what is still
-approximate, is in [docs/compatibility.md](docs/compatibility.md).
+scene, which WallForge detects and refuses instead of showing a black screen. The full matrix, including what is
+still approximate, is in [docs/compatibility.md](docs/compatibility.md).
 
 | Wallpaper type | Status |
 |---|---|
@@ -84,7 +91,7 @@ Settings that trade a little sharpness for a lot less GPU time:
 - **Pause wallpapers on battery**: stops every wallpaper while discharging and brings them back when you plug in.
 
 If a wallpaper stops on its own, WallForge restarts it; after three failures in five minutes it leaves the screen idle
-and says so in the playing bar instead of looping on a crash. The log is under Settings > About > View log.
+and says so in the playing bar instead of looping on a crash.
 
 ## Rotation
 
@@ -110,59 +117,35 @@ again from the menu (or your launcher) and it comes straight back. **Ctrl+Q** qu
 - **Per monitor**: apply to one screen or all. Ultrawide wallpapers are cropped to fill 16:9 screens, or skipped if you prefer.
 - **Auto scaling** by default; fill, fit and stretch are in Settings.
 - **Palette sync** with Noctalia, matugen, wallust, pywal or a custom command.
-- **Restore at login**: `wallforge.sh --restore` re-applies your saved wallpapers (toggle in Settings).
+- **Restore at login**: `wallforge --restore` re-applies your saved wallpapers (toggle in Settings).
 - **Audio-reactive wallpapers** hear what you play: visualisers and spectrum effects are driven by the system's audio
   output, with no microphone involved, and stay idle when no wallpaper asks for them.
 - **Safe**: a crash shows a toast with a "View log" button, a dead renderer is restarted automatically, broken files
   are caught by a watchdog, and unsupported 3D scenes are detected before you apply them.
 - **Sensible defaults**: anime and mature content are hidden until you switch them on in Settings.
-- Keyboard: `Ctrl+F` search, `Ctrl+R` random, `Ctrl+,` settings, `F5` rescan.
 
-## Contents
-
-- [What plays](#what-plays)
-- [Screenshots](#screenshots)
-- [Performance](#performance)
-- [Rotation](#rotation)
-- [Features](#features)
-- [Install](#install)
-- [Share a wallpaper](#share-a-wallpaper)
-- [Import your Wallpaper Engine settings](#import-your-wallpaper-engine-settings)
-- [Wallpaper Engine's assets](#wallpaper-engines-assets)
-- [Command line](#command-line)
-- [Updates](#updates)
-- [When a wallpaper looks wrong](#when-a-wallpaper-looks-wrong)
-- [More documentation](#more-documentation)
+Keyboard: `Ctrl+F` search · `Ctrl+R` random wallpaper · `Ctrl+Shift+N` rotate now · `Ctrl+,` settings · `F5` rescan ·
+`Esc` hide the sidebar · `Ctrl+Q` quit (including from the background).
 
 ## Install
 
-### Requirements
+### What you need
 
-- A Wayland compositor with layer-shell support (niri, Hyprland, Sway, ...). GNOME Shell does not have it.
-- Python 3.11+, GTK 4, libadwaita 1.5+, PyGObject, Pillow, aiohttp, ffmpeg
-- Rust (cargo) and clang to build the renderer, plus libva and EGL
-- For web wallpapers: `webkitgtk-6.0` and `gtk4-layer-shell`
-- Steam, signed in to an account that owns Wallpaper Engine, for downloading Workshop wallpapers
+- A Wayland compositor with layer-shell support. That is every wlroots-or-equivalent desktop: **niri, Hyprland, Sway,
+  river, Wayfire, labwc**. GNOME Shell and KDE Plasma do not implement `wlr-layer-shell`, so WallForge cannot draw
+  there. X11 is not supported.
+- Python 3.11+, GTK 4, libadwaita 1.5+, PyGObject, Pillow, aiohttp, ffmpeg. For the renderer: Rust, clang, libva and
+  EGL. For web wallpapers: `webkitgtk-6.0` and `gtk4-layer-shell`.
+- Steam, signed in to an account that owns Wallpaper Engine, to download Workshop wallpapers. Scene wallpapers also
+  need Wallpaper Engine's shared `assets/` folder, which WallForge never ships —
+  [here is how to get it](#wallpaper-engines-assets).
 
-Arch / CachyOS:
-
-```bash
-sudo pacman -S python-gobject gtk4 libadwaita python-pillow python-aiohttp ffmpeg libva rust clang \
-               webkitgtk-6.0 gtk4-layer-shell
-```
-
-### From source
-
-```bash
-git clone https://github.com/pgm1207/WallForge
-cd WallForge
-./install.sh        # builds the renderer (about a minute), adds a menu entry and icon
-./wallforge.sh
-```
+Run `wallforge --doctor` at any time (or `./wallforge.sh --doctor` from a source checkout) to check all of the above
+on your machine and print what to fix.
 
 ### Arch binary repository
 
-Every release is packaged and published to a pacman repository, so Arch and CachyOS can install and update it with
+Every release is packaged and published to a pacman repository, so Arch and CachyOS install and update it with
 pacman:
 
 ```bash
@@ -176,13 +159,37 @@ sudo pacman -Sy wallforge
 ```
 
 Those packages are unsigned and the repository sets `SigLevel = Optional`; if you sign your own repositories, build
-from source instead. What is published, and how it is built, is in
-[`packaging/arch-repo/`](packaging/arch-repo).
+from source instead. What is published, and how it is built, is in [`packaging/arch-repo/`](packaging/arch-repo).
 
 ### AUR
 
 A `wallforge-git` PKGBUILD is in [`packaging/aur/`](packaging/aur). It is not on the AUR yet (the AUR pauses new
 registrations from time to time); build it with `makepkg -si` from that folder in the meantime.
+
+### From source
+
+```bash
+# Arch / CachyOS
+sudo pacman -S python-gobject gtk4 libadwaita python-pillow python-aiohttp ffmpeg libva rust clang \
+               webkitgtk-6.0 gtk4-layer-shell
+git clone https://github.com/pgm1207/WallForge
+cd WallForge
+./install.sh        # builds the renderer (about a minute), adds a menu entry and icon
+./wallforge.sh
+```
+
+`install.sh` installs into `~/.local/opt/wallforge` and links a launcher; the checkout stays the source of truth, so
+`--restore` and updates keep working.
+
+On other distributions, install the same pieces from your package manager:
+
+| Distribution | Packages |
+|---|---|
+| Fedora | `python3-gobject gtk4 libadwaita python3-pillow python3-aiohttp ffmpeg-free rust cargo clang libva-devel mesa-libEGL webkitgtk6.0 gtk4-layer-shell` |
+| Debian 13+ / Ubuntu | `python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-pil python3-aiohttp ffmpeg cargo clang libva-dev libegl1`, plus `libgtk4-layer-shell0 gir1.2-gtk4layershell-1.0` for web wallpapers |
+
+Names drift between releases and only the Arch list is exercised in CI, so run `wallforge --doctor` afterwards: it
+names whichever piece is missing instead of making you guess.
 
 ## Share a wallpaper
 
@@ -208,7 +215,7 @@ your Windows drive with **Choose file**. You see what would change before anythi
 | The fullscreen pause rule | Settings of wallpapers that are not installed here |
 | Optionally, the wallpaper that was active | |
 
-From a terminal: `./wallforge.sh --import-we [path/to/config.json] [--dry-run]`.
+From a terminal: `wallforge --import-we [path/to/config.json] [--dry-run]`.
 Details are in [docs/wallpaper-engine-import.md](docs/wallpaper-engine-import.md).
 
 ## Wallpaper Engine's assets
@@ -216,23 +223,27 @@ Details are in [docs/wallpaper-engine-import.md](docs/wallpaper-engine-import.md
 You do not need Wallpaper Engine installed, but you do need to own it. Scene wallpapers need its `assets/` folder
 (shaders and textures), which WallForge never ships. Video and web wallpapers do not need it. Use either:
 
-1. **Fetch from Steam (about 85 MB).** Settings > Setup > Fetch opens a terminal where you sign in to Steam with
-   [DepotDownloader](https://github.com/SteamRE/DepotDownloader) (pinned release, checksum verified). Your password
-   goes to DepotDownloader only, never to WallForge. An account that does not own Wallpaper Engine is refused by Steam.
+1. **Fetch from Steam (about 85 MB).** Settings > Setup > **Fetch assets from Steam** opens a terminal where you sign
+   in to Steam with [DepotDownloader](https://github.com/SteamRE/DepotDownloader) (pinned release, checksum verified).
+   Your password goes to DepotDownloader only, never to WallForge. An account that does not own Wallpaper Engine is
+   refused by Steam.
 2. **Install it in Steam** (about 0.8 GB). WallForge uses its `assets/` folder directly.
 
 Workshop wallpapers themselves are downloaded by the Steam client when you subscribe.
 
 ## Command line
 
-```bash
-./wallforge.sh                         # the app
-./wallforge.sh --restore               # re-apply the saved wallpapers and exit (for autostart)
-./wallforge.sh --import-we [FILE] [--dry-run]   # import Wallpaper Engine settings
-./wallforge.sh --doctor                # check the setup (Wayland, assets, renderer, decode) and exit
-```
+`wallforge` is the command from a package install; from a checkout it is `./wallforge.sh`. Both take the same flags.
 
-The renderer and the web player can be run on their own; see [`render/README.md`](render/README.md).
+| Command | What it does |
+|---|---|
+| `wallforge` | The app. |
+| `wallforge --restore` | Re-apply the saved wallpapers and exit, for autostart. |
+| `wallforge --doctor` | Check the setup (Wayland, layer-shell, GTK, assets, renderer, decode) and exit; read-only, no display needed, exit code 1 when something is broken. |
+| `wallforge --import-we [FILE] [--dry-run]` | Import Wallpaper Engine's settings. |
+
+The renderer and the web player can also be run on their own; see [`render/README.md`](render/README.md) for
+`wallforge-render --check`, `--scale`, `--no-audio-processing` and the rest.
 
 ## Updates
 
@@ -241,13 +252,46 @@ itself: it pulls the new version in the background (`git pull --ff-only`), check
 does not, then offers "Restart now". Local edits in the folder are never overwritten. A package install only tells
 you and leaves the update to your package manager.
 
+## FAQ
+
+**Do I need Wallpaper Engine installed?** Installed, no; owned, yes, for scene and web wallpapers. WallForge reads the
+shared `assets/` folder from your own copy, or fetches it from Steam with your account. Video wallpapers need nothing
+but the file.
+
+**Is this a wrapper around linux-wallpaperengine or Wine?** Neither. `wallforge-render` is a Rust renderer that reads
+the wallpaper's `project.json`, `scene.json` and its shaders, and draws them with GLES on a layer-shell surface. See
+[docs/comparison.md](docs/comparison.md) for how it compares, including where the other projects do better.
+
+**Will it work on GNOME or KDE?** No. Both compositors lack `wlr-layer-shell`, which is how a wallpaper gets attached
+behind your windows. On niri, Hyprland, Sway, river, Wayfire or labwc it works.
+
+**Why is SceneScript not supported?** Scenes that ship a script (scripted camera moves, media panels, sequences) run
+only part of their logic here; the picture still appears, but it can be incomplete. It is the largest remaining gap
+and it is listed in [docs/compatibility.md](docs/compatibility.md).
+
+**Can each monitor show a different wallpaper?** Yes. Pick a wallpaper, choose the screen in the play controls, or
+use *Give each screen its own wallpaper* in rotation so they change independently.
+
+**Ultrawide wallpaper on a 16:9 screen?** It is cropped to fill, never stretched. Switch *Allow ultrawide wallpapers on
+16:9 screens* off in Settings to skip them instead. On a 16:9 wallpaper on an ultrawide screen, *fill* crops, *fit*
+letterboxes.
+
+**How much does it cost while I work?** About 1% of one core for a 4K video, and a still scene sleeps after its first
+frame. The [performance table](#performance) is measured, not estimated, and `tools/bench.sh` reproduces it.
+
+**Does it come back after a reboot?** Yes: *Restore at login* in Settings, or `wallforge --restore` in your
+compositor's autostart.
+
 ## When a wallpaper looks wrong
 
 Scene wallpapers are the hard part, and some still render differently from Wallpaper Engine. Please
 [open an issue](https://github.com/pgm1207/WallForge/issues/new/choose) with the wallpaper's Workshop link (the share
-button copies it) and the log, which is at `$XDG_RUNTIME_DIR/wallforge/<output>.log` or behind "View log" in the
-crash toast. Settings > Updates > **Copy diagnostics** puts the version, GPU, renderer report and log lines on the
-clipboard in one click, and `./wallforge.sh --doctor` checks the whole setup from a terminal. [docs/troubleshooting.md](docs/troubleshooting.md) covers the common problems.
+button copies it) and its log — Settings > Updates > **Copy diagnostics** puts the version, GPU, the renderer's report
+for that wallpaper and the last log lines on the clipboard in one click.
+
+Logs live at `$XDG_RUNTIME_DIR/wallforge/<output>.log`, and the crash toast has a **View log** button.
+`wallforge --doctor` checks the setup itself, and [docs/troubleshooting.md](docs/troubleshooting.md) covers the common
+problems.
 
 ## More documentation
 
@@ -257,6 +301,7 @@ clipboard in one click, and `./wallforge.sh --doctor` checks the whole setup fro
 - [docs/troubleshooting.md](docs/troubleshooting.md): setup problems, logs, known limits
 - [render/README.md](render/README.md): the renderer, its flags and internals
 - [CONTRIBUTING.md](CONTRIBUTING.md): building, testing against your library, sending fixes
+- [SECURITY.md](SECURITY.md): reporting a vulnerability
 - [CHANGELOG.md](CHANGELOG.md)
 
 ## Disclaimer

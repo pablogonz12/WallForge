@@ -6,3 +6,9 @@ contact_links:
   - name: Compatibility
     url: https://github.com/pgm1207/WallForge/blob/main/docs/compatibility.md
     about: Which Wallpaper Engine features are supported.
+  - name: How WallForge compares
+    url: https://github.com/pgm1207/WallForge/blob/main/docs/comparison.md
+    about: WallForge next to other ways of playing Wallpaper Engine content, including where they do better.
+  - name: Questions and ideas
+    url: https://github.com/pgm1207/WallForge/discussions
+    about: Ask for help, share your setup, or suggest a feature.

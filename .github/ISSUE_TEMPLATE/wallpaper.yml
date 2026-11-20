@@ -20,10 +20,10 @@ body:
   - type: textarea
     id: log
     attributes:
-      label: Log
+      label: Diagnostics
       description: >-
-        The contents of $XDG_RUNTIME_DIR/wallforge/<output>.log (or "View log" in the crash toast), or the output of
-        `wallforge-render --check <wallpaper folder>`.
+        Settings > Updates > Copy diagnostics (version, GPU, this wallpaper's renderer report and log), or
+        `wallforge --doctor` for a setup check, or `wallforge-render --check <wallpaper folder>`.
       render: text
   - type: input
     id: system
