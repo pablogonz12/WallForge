@@ -123,6 +123,28 @@ fn val_str(v: &Value) -> String {
     match v { Value::Bool(b) => (*b as i32).to_string(), Value::Number(n) => n.to_string(), Value::String(s) => s.clone(), o => o.to_string() }
 }
 
+/// Opaque mask slots gated by a combo: `g_TextureN` annotated `"mode":"opacitymask"` with a `require` (blurprecise's
+/// `ENABLEMASK`). Wallpaper Engine only offers such a property while its gate is on, and an unpainted mask is black
+/// (paintdefaultcolor `0 0 0 1`), so a pass that turns the gate on without supplying a mask behaves as "mask = 0".
+pub fn mask_slots(read: &dyn Fn(&str) -> Option<String>, shader: &str) -> Vec<(usize, Map<String, Value>)> {
+    let mut out = vec![];
+    let Some(raw) = read(&format!("shaders/{shader}.frag")) else { return out };
+    let mut src = String::new();
+    if expand(read, &raw, 0, &mut src).is_err() { return out; }
+    for line in src.lines() {
+        let t = line.trim_start();
+        let Some(rest) = t.strip_prefix("uniform ") else { continue };
+        let Some(j) = json_tail(t) else { continue };
+        if j.get("mode").and_then(|m| m.as_str()) != Some("opacitymask") { continue; }
+        let Some(req) = j.get("require").and_then(|r| r.as_object()) else { continue; };
+        let decl = rest.split("//").next().unwrap_or("").trim().trim_end_matches(';').trim();
+        let name = decl.split_whitespace().nth(1).unwrap_or("").split('[').next().unwrap_or("");
+        let Ok(slot) = name.strip_prefix("g_Texture").unwrap_or("").parse::<usize>() else { continue };
+        out.push((slot, req.clone()));
+    }
+    out
+}
+
 fn stage(read: &dyn Fn(&str) -> Option<String>, path: &str, is_frag: bool, over: &Map<String, Value>, uniforms: &mut Vec<Uniform>,
          combos: &mut BTreeMap<String, String>, present: &[usize], floatify: bool) -> Result<String, String> {
     let raw = read(path).ok_or_else(|| format!("missing shader {path}"))?;
