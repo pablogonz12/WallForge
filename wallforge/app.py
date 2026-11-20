@@ -1206,7 +1206,7 @@ class Window(Adw.ApplicationWindow):
         bu.connect("clicked", lambda _b: self.check_update())
         ru.add_suffix(bu)
         gu.add(ru)
-        n = Adw.ActionRow(title="Changes apply the next time a wallpaper starts")
+        n = Adw.ActionRow(title="Frame rate, resolution and effect switches restart the running wallpapers at once; volume applies when one starts")
         n.add_css_class("dim-label")
         g3.add(n)
         d.present(self)
@@ -1316,7 +1316,35 @@ class Window(Adw.ApplicationWindow):
     def _set_e(self, key, val):
         self.cfg.data["engine"][key] = val
         self.cfg.save()
+        if key in RESTART_KEYS:
+            self._restart_later()
 
+    def _restart_later(self):
+        """Renderer settings take effect now: restart the running players, debounced while a slider moves."""
+        if getattr(self, "_restart_src", 0):
+            try:
+                GLib.source_remove(self._restart_src)
+            except Exception:
+                pass
+        self._restart_src = GLib.timeout_add(1200, self._restart_applied)
+
+    def _restart_applied(self):
+        self._restart_src = 0
+        by_id = {i.id: i for i in self.items}
+        for out, iid in list(self._applied.items()):
+            it = by_id.get(iid)
+            if not it:
+                continue
+            try:
+                engine.start(self.cfg, it, out)
+                self._started[out] = time.time()
+            except Exception:
+                pass
+        return False
+
+
+RESTART_KEYS = {"fps", "render_scale", "disable_particles", "disable_mouse", "disable_parallax", "layer", "scaling",
+                "clamp", "no_audio_processing", "no_fullscreen_pause", "fullscreen_pause_only_active"}
 
 AUTOSTART = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "autostart/dev.wallforge.Wallforge-restore.desktop"
 
