@@ -48,7 +48,11 @@ class LastRunTests(unittest.TestCase):
         entries = self._with_log("starting\nwallforge-render: panic: boom\n")
         self.assertTrue(all(len(e) == 3 for e in entries), entries)
         self.assertIn("last run", [label for _, label, _ in entries])
-        self.assertEqual(doctor.report(entries)[1], 0)
+        # the report still builds, and its exit code only reflects FAIL lines (a runner may have its own,
+        # e.g. no layer-shell, so do not assume a healthy machine)
+        text, code = doctor.report(entries)
+        self.assertIn("last run", text)
+        self.assertEqual(code, 1 if any(s == doctor.BAD for s, _, _ in entries) else 0)
 
     def test_an_empty_log_dir_adds_nothing(self):
         entries = self._with_log("")
