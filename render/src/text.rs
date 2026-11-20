@@ -264,6 +264,11 @@ impl Live {
     pub fn next_check(&self) -> Instant { self.checked + std::time::Duration::from_secs(1) }
 }
 
+/// The glyph texture lives in the engine's layer too; free it when the layer is rebuilt.
+impl Drop for Live {
+    fn drop(&mut self) { if self.tex != 0 { unsafe { gl::DeleteTextures(1, &self.tex); } } }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
