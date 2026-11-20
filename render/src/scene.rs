@@ -55,8 +55,25 @@ impl Props {
                     _ => default,
                 }
             }
-            _ => if o.contains_key("value") { default } else { v.clone() },
+            _ => if o.contains_key("value") { self.script_axes(o, default) } else { v.clone() },
         }
+    }
+    /// Scripts of the form `value.y = scriptProperties.posY;` only overwrite vector components with script properties: honour those
+    /// (anything more elaborate keeps the stored default, scripts are not executed).
+    fn script_axes(&self, o: &serde_json::Map<String, Value>, default: Value) -> Value {
+        let (Some(Value::String(src)), Some(Value::Object(sp)), Some(f)) = (o.get("script"), o.get("scriptproperties"), floats(&default)) else { return default };
+        if f.len() < 2 { return default; }
+        let mut f = f; let mut hit = false;
+        for line in src.lines() {
+            let l = line.trim().trim_end_matches(';').replace(' ', "");
+            let Some(r) = l.strip_prefix("value.") else { continue };
+            let Some((ax, rhs)) = r.split_once('=') else { continue };
+            let Some(name) = rhs.strip_prefix("scriptProperties.") else { continue };
+            let i = match ax { "x" => 0, "y" => 1, "z" => 2, _ => continue };
+            if i >= f.len() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') { continue; }
+            if let Some(v) = sp.get(name).and_then(|v| floats(&self.resolve(v))).and_then(|v| v.first().copied()) { f[i] = v; hit = true; }
+        }
+        if hit { Value::String(f.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")) } else { default }
     }
     pub fn floats(&self, v: Option<&Value>) -> Option<Vec<f32>> { floats(&self.resolve(v?)) }
     pub fn boolean(&self, v: Option<&Value>, d: bool) -> bool {
