@@ -43,7 +43,7 @@ not listed here, please [report it](troubleshooting.md#reporting-a-wallpaper-tha
 | SceneScript (general scripting) | No. Scripted motion and logic stay at their starting state |
 | Audio-reactive effects and visualisers | Drawn, but they receive silence (no audio capture yet) |
 | Sound layers | No |
-| Camera parallax, mouse interaction, cursor effects | No |
+| Camera parallax, mouse interaction, cursor effects | No. Camera framing itself comes from the scene's orthographic projection and is matched; wallpapers whose previews are close-up crops (for example maps meant to span two monitors) show the same centre region Wallpaper Engine shows on one screen |
 | Camera shake, camera paths | No |
 | Puppet warp animation (bone-animated characters) | No; such layers are reported as unsupported |
 | Lighting, reflections, 3D models | No |
