@@ -10,10 +10,10 @@
   <img src="https://img.shields.io/badge/Wayland-layer--shell-6e56cf" alt="Wayland layer-shell">
 </p>
 
-<p align="center"><img src="assets/demo.gif" alt="A scene wallpaper with a fluid-simulation effect, rendered live by WallForge" width="760"></p>
+<p align="center"><img src="assets/demo-app.gif" alt="WallForge on niri: opening the library and switching between Wallpaper Engine wallpapers" width="760"></p>
 
-<p align="center"><sub>Recorded from the renderer: a Wallpaper Engine scene with a multi-pass fluid simulation, no post-processing.<br>
-<a href="https://github.com/pgm1207/WallForge/releases/download/v0.7.0/demo.mp4">Same clip as video (mp4, 5 s)</a></sub></p>
+<p align="center"><sub>WallForge on niri: opening the library and switching wallpapers.<br>
+<a href="https://github.com/pgm1207/WallForge/releases/download/v0.7.0/demo-app.mp4">Same clip as video (mp4, 1080p60, 18 s)</a></sub></p>
 
 **WallForge** is a GTK4 / libadwaita app *and* the renderer behind it. It plays the
 [Wallpaper Engine](https://store.steampowered.com/app/431960/) wallpapers you already own on any Wayland desktop with
@@ -73,6 +73,11 @@ still approximate, is in [docs/compatibility.md](docs/compatibility.md).
 <td align="center"><sub>Settings: setup status at a glance, then playback, rotation, power and desktop</sub></td>
 </tr>
 </table>
+
+<p align="center"><img src="assets/demo.gif" alt="A scene wallpaper with a fluid-simulation effect, rendered live by WallForge" width="760"></p>
+
+<p align="center"><sub>Recorded from the renderer: a Wallpaper Engine scene with a multi-pass fluid simulation, no post-processing.<br>
+<a href="https://github.com/pgm1207/WallForge/releases/download/v0.7.0/demo.mp4">Same clip as video (mp4, 5 s)</a></sub></p>
 
 ## Performance
 
