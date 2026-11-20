@@ -71,17 +71,18 @@ struct Args {
     screenshot: Option<PathBuf>,
     shot_size: (i32, i32),
     shot_time: f32,
+    scale: u32,
 }
 
 fn usage() -> ! {
     eprintln!("usage: wallforge-render --output NAME --bg <dir|video> [--scaling fill|fit|stretch] [--fps N] \
-               [--layer background|bottom|top|overlay] [--silent] [--volume N] [--duration SECS] [--software] [--disable-particles] [--assets-dir DIR] [--set-property key=value]...\n       wallforge-render --check <dir|video>   (probe, print one JSON line, no window)");
+               [--scale 25..100] [--layer background|bottom|top|overlay] [--silent] [--volume N] [--duration SECS] [--software] [--disable-particles] [--assets-dir DIR] [--set-property key=value]...\n       wallforge-render --check <dir|video>   (probe, print one JSON line, no window)");
     std::process::exit(2)
 }
 
 fn parse_args() -> Args {
     let mut a = Args { output: String::new(), bg: PathBuf::new(), scaling: Scaling::Fill, fps: 30.0,
-        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false, check: false, assets_dir: None, props: vec![], make_test: None, screenshot: None, shot_size: (1920, 1080), shot_time: 0.0 };
+        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false, check: false, assets_dir: None, props: vec![], make_test: None, screenshot: None, shot_size: (1920, 1080), shot_time: 0.0, scale: 100 };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| usage());
@@ -90,6 +91,7 @@ fn parse_args() -> Args {
             "--bg" => a.bg = PathBuf::from(val()),
             "--scaling" => a.scaling = match val().as_str() { "fill" => Scaling::Fill, "fit" => Scaling::Fit, "stretch" => Scaling::Stretch, _ => usage() },
             "--fps" => a.fps = val().parse().unwrap_or_else(|_| usage()),
+            "--scale" => a.scale = val().parse::<u32>().unwrap_or_else(|_| usage()).clamp(25, 100),
             "--layer" => a.layer = match val().as_str() {
                 "background" => zwlr_layer_shell_v1::Layer::Background, "bottom" => zwlr_layer_shell_v1::Layer::Bottom,
                 "top" => zwlr_layer_shell_v1::Layer::Top, "overlay" => zwlr_layer_shell_v1::Layer::Overlay, _ => usage() },

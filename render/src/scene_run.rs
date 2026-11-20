@@ -116,6 +116,11 @@ pub fn run(args: Args) {
     };
     apply_viewport(app.frac, app.size);
     let (bw, bh) = phys(app.size, app.frac);
+    // internal render size: the layer surface is `bw`x`bh`, we draw at `scale`% of it and upscale
+    let internal = |screen: (i32, i32)| -> (i32, i32) {
+        (((screen.0 as f64 * args.scale as f64 / 100.0).round().max(1.0)) as i32,
+         ((screen.1 as f64 * args.scale as f64 / 100.0).round().max(1.0)) as i32)
+    };
     let wl_display = conn.backend().display_ptr() as *mut c_void;
     let (dpy, ctx, esurf, win);
     unsafe {
@@ -139,7 +144,8 @@ pub fn run(args: Args) {
     }
     gl::load_with(|n| proc_addr(n) as *const _);
     set_opaque(&compositor, &surface, &qh, app.size);
-    let mut engine = Engine::new(vfs, scn, (bw, bh), args.scaling).unwrap_or_else(|e| fatal(&e));
+    let mut engine = Engine::new(vfs, scn, internal((bw, bh)), args.scaling).unwrap_or_else(|e| fatal(&e));
+    engine.set_screen((bw, bh));
 
     let period = Duration::from_secs_f64(1.0 / args.fps);
     let start = Instant::now();
@@ -155,7 +161,8 @@ pub fn run(args: Args) {
             let (w, h) = phys(app.size, app.frac);
             win.resize(w, h, 0, 0);
             set_opaque(&compositor, &surface, &qh, app.size);
-            engine.resize((w, h));
+            engine.resize(internal((w, h)));
+            engine.set_screen((w, h));
             eprintln!("wallforge-render: surface {}x{} logical -> {}x{} physical", app.size.0, app.size.1, w, h);
             dirty = true;
         }
@@ -236,7 +243,10 @@ fn screenshot(args: &Args, vfs: Vfs, scn: Scene, path: &Path) {
         if surf.is_null() || eglMakeCurrent(dpy, surf, surf, ctx) == 0 { fatal("pbuffer surface / eglMakeCurrent"); }
     }
     gl::load_with(|n| proc_addr(n) as *const _);
-    let mut engine = Engine::new(vfs, scn, (w, h), args.scaling).unwrap_or_else(|e| fatal(&e));
+    let (iw, ih) = (((w as f64 * args.scale as f64 / 100.0).round().max(1.0)) as i32,
+                    ((h as f64 * args.scale as f64 / 100.0).round().max(1.0)) as i32);
+    let mut engine = Engine::new(vfs, scn, (iw, ih), args.scaling).unwrap_or_else(|e| fatal(&e));
+    engine.set_screen((w, h));
     // two warm-up frames at t-ε so ping-pong/time-dependent state settles, last frame at the requested time
     let t = args.shot_time;
     for i in 0..3 {

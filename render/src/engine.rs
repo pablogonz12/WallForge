@@ -75,6 +75,7 @@ impl Target {
         }
     }
     fn bytes(&self) -> usize { self.w as usize * self.h as usize * 4 }
+    fn free(&self) { unsafe { gl::DeleteFramebuffers(1, &self.fbo); gl::DeleteTextures(1, &self.tex); } }
 }
 
 impl Layer {
@@ -106,7 +107,7 @@ pub struct Engine {
     layers: Vec<Layer>, prog: u32, u_mvp: i32, u_size: i32, u_tint: i32, u_pm: i32, u_flip: i32, u_uvs: i32, u_uvo: i32,
     vao: u32, view: Mat4, pub clear: [f32; 3], scene_wh: (f32, f32),
     pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32,
-    out: (i32, i32), scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
+    out: (i32, i32), screen: (i32, i32), main_rt: Option<Target>, scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
     t0: std::time::Instant, time_override: Option<f32>, videos: Vec<crate::video::VideoTex>, texts: Vec<crate::text::Live>, parts: crate::particles::Set,
 }
 
@@ -147,7 +148,7 @@ impl Engine {
         }
         let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_pm: loc(prog, "pm"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
             vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
-            out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], texts: vec![], parts: Default::default() };
+            out, screen: out, main_rt: None, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], texts: vec![], parts: Default::default() };
         e.rebuild();
         Ok(e)
     }
@@ -155,6 +156,9 @@ impl Engine {
     pub fn set_time(&mut self, t: Option<f32>) { self.time_override = t; }
 
     pub fn resize(&mut self, out: (i32, i32)) { if out != self.out { self.out = out; self.rebuild(); } }
+
+    /// Size of the surface we present to (the layer surface); differs from `out` when rendering scaled.
+    pub fn set_screen(&mut self, screen: (i32, i32)) { self.screen = (screen.0.max(1), screen.1.max(1)); }
 
     fn white_tex(&mut self) -> u32 {
         if self.white == 0 { unsafe {
@@ -171,6 +175,7 @@ impl Engine {
     /// (Re)build all GPU resources for the current output size (texture mips / FBO sizes depend on it).
     fn rebuild(&mut self) {
         self.videos.clear(); self.texts.clear(); self.layers.clear(); self.parts.clear(); self.vram = 0; self.animated = false; self.scene_rt = None;
+        if let Some(rt) = self.main_rt.take() { rt.free(); }
         let (v, sx, sy) = view_matrix(self.scene_wh.0, self.scene_wh.1, self.out.0, self.out.1, self.scaling);
         self.view = v;
         let s3tc = tex::has_s3tc();
@@ -409,7 +414,23 @@ impl Engine {
 
     pub fn draw(&mut self) {
         let t = self.time_override.unwrap_or_else(|| self.t0.elapsed().as_secs_f32());
-        let rt_fbo = self.scene_rt.as_ref().map(|r| r.fbo).unwrap_or(0);
+        // When `screen != out` the whole frame is composed into an internal-size target, then blitted up.
+        let scaled = self.screen != self.out;
+        let main_fbo = if scaled {
+            match self.main_rt {
+                Some(rt) if rt.w == self.out.0 && rt.h == self.out.1 => rt.fbo,
+                _ => {
+                    if let Some(old) = self.main_rt.take() { old.free(); }
+                    let rt = Target::new(self.out.0.max(1), self.out.1.max(1));
+                    self.main_rt = Some(rt);
+                    rt.fbo
+                }
+            }
+        } else {
+            if let Some(old) = self.main_rt.take() { old.free(); }
+            0
+        };
+        let rt_fbo = self.scene_rt.as_ref().map(|r| r.fbo).unwrap_or(main_fbo);
         unsafe {
             gl::BindFramebuffer(gl::FRAMEBUFFER, rt_fbo);
             gl::Viewport(0, 0, self.out.0, self.out.1);
@@ -448,7 +469,7 @@ impl Engine {
         self.draw_parts(self.layers.len(), rt_fbo);
         if let Some(rt) = &self.scene_rt {
             unsafe {
-                gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+                gl::BindFramebuffer(gl::FRAMEBUFFER, main_fbo);
                 gl::Viewport(0, 0, self.out.0, self.out.1);
                 gl::Disable(gl::BLEND);
                 gl::UseProgram(self.prog);
@@ -458,6 +479,16 @@ impl Engine {
                 gl::Uniform1f(self.u_flip, 1.0); gl::Uniform2f(self.u_uvs, 1.0, 1.0); gl::Uniform2f(self.u_uvo, 0.0, 0.0);
                 gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, rt.tex);
                 gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
+            }
+        }
+        if scaled {
+            unsafe {
+                gl::BindFramebuffer(gl::READ_FRAMEBUFFER, main_fbo);
+                gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
+                gl::Viewport(0, 0, self.screen.0, self.screen.1);
+                gl::Disable(gl::BLEND);
+                gl::BlitFramebuffer(0, 0, self.out.0, self.out.1, 0, 0, self.screen.0, self.screen.1, gl::COLOR_BUFFER_BIT, gl::LINEAR);
+                gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
             }
         }
     }
