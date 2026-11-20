@@ -20,6 +20,10 @@ DEFAULTS = {
     "ultrawide_on_16_9": True,  # allow ultrawide wallpapers on 16:9 screens (cropped to fill)
     "safe_content": True,  # Discover hides Mature/Questionable
     "autostart": False,
+    "rotate_minutes": 0,  # change the wallpaper every N minutes, 0 = never
+    "rotate_shuffle": True,  # pick at random instead of the next wallpaper in the library
+    "rotate_favorites": False,  # rotate only through favourites
+    "last_rotate": 0,  # unix time of the last automatic change
     "check_updates": True,
     "auto_update": True,
     "last_update_check": 0,

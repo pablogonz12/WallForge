@@ -101,6 +101,7 @@ class Window(Adw.ApplicationWindow):
         self._started: dict[str, float] = {}  # output -> when we last tried to start it
         self._crashed: set[str] = set()  # outputs given up on after repeated crashes
         self._battery_paused = False
+        self._last_rotate = float(self.cfg.data.get("last_rotate") or 0)
 
         self.toasts = Adw.ToastOverlay()
         self.set_content(self.toasts)
@@ -569,6 +570,63 @@ class Window(Adw.ApplicationWindow):
         self.select(self.sel)
         self.apply([o["name"] for o in mons])
 
+    # ------------------------------------------------------------------ rotation
+    def _rotate_pool(self) -> list:
+        """Wallpapers the automatic rotation may pick (same filters as the library view)."""
+        fav = set(self.cfg.data.get("favorites") or [])
+        only_fav = bool(self.cfg.data.get("rotate_favorites"))
+        pool = []
+        for i in self.items:
+            if i.broken or self._hidden_reason(i):
+                continue
+            if i.kind == "web" and engine.web_missing():
+                continue
+            if only_fav and i.id not in fav:
+                continue
+            pool.append(i)
+        return pool
+
+    def _next_rotated(self):
+        """The wallpaper a timer tick should switch to, avoiding what is already showing."""
+        pool = self._rotate_pool()
+        if not pool:
+            return None
+        cur = {v.get("id") for v in self.cfg.data["outputs"].values() if v.get("id")}
+        cand = [i for i in pool if i.id not in cur] or pool
+        if self.cfg.data.get("rotate_shuffle", True):
+            return random.choice(cand)
+        ids = [i.id for i in pool]
+        start = max((ids.index(x) for x in cur if x in ids), default=-1)
+        for k in range(1, len(pool) + 1):
+            it = pool[(start + k) % len(pool)]
+            if it.id not in cur:
+                return it
+        return pool[(start + 1) % len(pool)]
+
+    def _maybe_rotate(self):
+        """Settings timer: change every wallpaper once the configured interval has passed."""
+        mins = int(self.cfg.data.get("rotate_minutes") or 0)
+        if mins <= 0 or engine.pause_for_battery(self.cfg):
+            return
+        now = time.time()
+        if now - self._last_rotate < mins * 60:
+            return
+        outs = [o["name"] for o in (self._mons or monitors.outputs())]
+        if not any(self.cfg.data["outputs"].get(o, {}).get("id") for o in outs):
+            return
+        it = self._next_rotated()
+        self._last_rotate = now
+        self.cfg.data["last_rotate"] = now
+        self.cfg.save()
+        if not it:
+            return
+        self.sel = it
+        try:
+            self.select(it)
+        except Exception:
+            pass
+        self.apply(outs, it=it)
+
     def _shortcuts(self):
         ctl = Gtk.ShortcutController()
         ctl.set_scope(Gtk.ShortcutScope.GLOBAL)
@@ -618,6 +676,10 @@ class Window(Adw.ApplicationWindow):
     def _poll_playing(self):
         try:
             self._watchdog()
+        except Exception:
+            pass
+        try:
+            self._maybe_rotate()
         except Exception:
             pass
         self.refresh_playing()
@@ -1015,6 +1077,13 @@ class Window(Adw.ApplicationWindow):
         combo("Scaling", "scaling", ["auto", "fill", "fit", "stretch", "default"], "auto crops to fill the screen (ultrawide art included) and only fits portrait wallpapers; fill crops, fit shows all of it, stretch distorts")
         combo("Edge behaviour", "clamp", ["clamp", "border", "repeat"])
         combo("Layer", "layer", ["bottom", "background"])
+        rot = Adw.SpinRow.new_with_range(0, 1440, 5)
+        rot.set_title("Change wallpaper every (minutes, 0 = never)")
+        rot.set_value(c.get("rotate_minutes", 0))
+        rot.connect("notify::value", lambda rr, _p: (c.__setitem__("rotate_minutes", int(rr.get_value())), self.cfg.save()))
+        g1.add(rot)
+        top_switch(g1, "Pick a random wallpaper when it changes", "rotate_shuffle", "Off: walk the library in order.")
+        top_switch(g1, "Rotate only through favourites", "rotate_favorites")
         g2 = Adw.PreferencesGroup(title="Effects and power")
         pg.add(g2)
         g1 = g2

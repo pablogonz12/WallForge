@@ -53,6 +53,7 @@ with layer-shell support (niri, Hyprland, Sway, ...).
 - **Auto scaling** by default; fill, fit and stretch are in Settings.
 - **Palette sync** with Noctalia, matugen, wallust, pywal or a custom command.
 - **Restore at login**: `wallforge.sh --restore` re-applies your saved wallpapers (toggle in Settings).
+- **Rotation**: change the wallpaper on a timer, at random or in library order, optionally only through favourites.
 - **Low cost by default**: one small renderer per screen, still scenes drawn once and then frozen, a render
   resolution setting, and battery saving that lowers the frame rate (or pauses everything) when you unplug.
 - **Safe**: a crash shows a toast with a "View log" button, a dead renderer is restarted automatically, broken files
@@ -107,6 +108,13 @@ Settings that trade a little sharpness for a lot less GPU time:
 - **Reduce frame rate and resolution on battery**: while discharging, the limit drops to 30 fps and the render scale to
   75% at most, without touching your settings.
 - **Pause wallpapers on battery**: stops every wallpaper while discharging and brings them back when you plug in.
+
+### Rotation
+
+Settings > Playback > **Change wallpaper every** switches all screens to a new wallpaper every N minutes (0 turns it
+off). *Pick a random wallpaper* chooses at random; with it off, the library order is followed. *Rotate only through
+favourites* keeps the rotation to wallpapers you starred. Rotation waits while wallpapers are paused by battery saving,
+and a wallpaper that is already showing is never picked again immediately.
 
 If a wallpaper stops on its own, WallForge restarts it; after three failures in five minutes it leaves the screen idle
 and says so in the playing bar instead of looping on a crash. The log is under Settings > About > View log.
