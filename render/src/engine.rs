@@ -106,7 +106,7 @@ pub struct Engine {
     vao: u32, view: Mat4, pub clear: [f32; 3], scene_wh: (f32, f32),
     pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32,
     out: (i32, i32), scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
-    t0: std::time::Instant, time_override: Option<f32>,
+    t0: std::time::Instant, time_override: Option<f32>, parts: crate::particles::Set,
 }
 
 pub fn view_matrix(sw: f32, sh: f32, ow: i32, oh: i32, scaling: Scaling) -> (Mat4, f32, f32) {
@@ -146,7 +146,7 @@ impl Engine {
         }
         let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
             vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
-            out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None };
+            out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, parts: Default::default() };
         e.rebuild();
         Ok(e)
     }
@@ -169,7 +169,7 @@ impl Engine {
 
     /// (Re)build all GPU resources for the current output size (texture mips / FBO sizes depend on it).
     fn rebuild(&mut self) {
-        self.layers.clear(); self.vram = 0; self.animated = false; self.scene_rt = None;
+        self.layers.clear(); self.parts.clear(); self.vram = 0; self.animated = false; self.scene_rt = None;
         let (v, sx, sy) = view_matrix(self.scene_wh.0, self.scene_wh.1, self.out.0, self.out.1, self.scaling);
         self.view = v;
         let s3tc = tex::has_s3tc();
@@ -178,6 +178,7 @@ impl Engine {
         let mut pool: HashMap<(i32, i32, usize), Target> = HashMap::new();
         let n = self.scene.objects.len();
         for i in 0..n {
+            if let Kind::Particle { file, ov } = &self.scene.objects[i].kind { let (w, at) = (world_of(&self.scene.objects, i, 0), self.layers.len()); self.parts.add(&self.vfs, file, ov, w, at, s3tc, i as u64); self.animated |= !self.parts.is_empty(); continue; }
             let (name, model, size_o, scale, color, alpha, blend_o) = {
                 let o = &self.scene.objects[i];
                 let Kind::Image { model } = &o.kind else { continue };
@@ -374,7 +375,9 @@ impl Engine {
             gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::BindVertexArray(self.vao);
         }
+        self.parts.step(t);
         for li in 0..self.layers.len() {
+            self.draw_parts(li, rt_fbo);
             let l = &self.layers[li];
             if l.full && l.ping.is_none() { continue; }
             let src_tex = if l.full { self.render_effects(li, t, self.scene_rt.as_ref().map(|r| r.tex)) } else { self.render_effects(li, t, None) };
@@ -398,6 +401,7 @@ impl Engine {
                 gl::Disable(gl::BLEND);
             }
         }
+        self.draw_parts(self.layers.len(), rt_fbo);
         if let Some(rt) = &self.scene_rt {
             unsafe {
                 gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
@@ -413,6 +417,8 @@ impl Engine {
             }
         }
     }
+
+    fn draw_parts(&mut self, at: usize, fbo: u32) { if self.parts.is_empty() { return; } self.parts.draw(at, &self.view, fbo, self.out); unsafe { gl::BindVertexArray(self.vao); } }
 
     /// Runs the layer's effect chain; returns the texture holding the final image.
     fn render_effects(&self, li: usize, t: f32, src: Option<u32>) -> u32 {

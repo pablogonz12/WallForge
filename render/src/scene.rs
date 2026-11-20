@@ -84,7 +84,7 @@ fn v3(v: Option<Vec<f32>>, d: [f32; 3]) -> [f32; 3] {
 pub struct PassOv { pub constants: Map<String, Value>, pub textures: Vec<Option<String>>, pub combos: Map<String, Value> }
 pub struct EffectRef { pub file: String, pub name: String, pub passes: Vec<PassOv> }
 
-pub enum Kind { Image { model: String }, Particle { file: String }, Sound { files: Vec<String> }, Light, Group, Other(String) }
+pub enum Kind { Image { model: String }, Particle { file: String, ov: Vec<(String, Vec<f32>)> }, Sound { files: Vec<String> }, Light, Group, Other(String) }
 
 pub struct Obj {
     pub id: i64, pub name: String, pub kind: Kind,
@@ -115,7 +115,7 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
         if !props.boolean(o.get("visible"), true) { continue; }
         let id = o.get("id").and_then(|v| v.as_i64()).unwrap_or(-1);
         let kind = if let Some(i) = o.get("image").and_then(|v| v.as_str()) { Kind::Image { model: i.to_string() }
-            } else if let Some(p) = o.get("particle").and_then(|v| v.as_str()) { Kind::Particle { file: p.to_string() }
+            } else if let Some(p) = o.get("particle").and_then(|v| v.as_str()) { Kind::Particle { file: p.to_string(), ov: o.get("instanceoverride").and_then(|v| v.as_object()).map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), props.floats(Some(v))?))).collect()).unwrap_or_default() }
             } else if let Some(s) = o.get("sound").and_then(|v| v.as_array()) { Kind::Sound { files: s.iter().filter_map(|x| x.as_str().map(String::from)).collect() }
             } else if o.get("light").is_some() { Kind::Light
             } else if let Some(m) = o.get("model").and_then(|v| v.as_str()) {
