@@ -52,6 +52,10 @@ def eval_condition(cond: str | None, values: dict) -> bool:
         return True
 
 
+# Wallpaper Engine's own translation keys that wallpapers use as labels
+UI_KEYS = {"ui_browse_properties_scheme_color": "Scheme colour"}
+
+
 class PropertyEditor(Gtk.Box):
     """`values` is the live dict (defaults then overrides). `on_change(key, value)` fires per edit."""
 
@@ -67,6 +71,7 @@ class PropertyEditor(Gtk.Box):
         for key, spec in ordered:
             t = (spec.get("type") or "").lower()
             label = re.sub(r"<[^>]+>", "", str(spec.get("text") or key)).strip() or key
+            label = UI_KEYS.get(label, label)
             if t == "group":
                 group = Adw.PreferencesGroup(title=GLib.markup_escape_text(label))
                 self.append(group)

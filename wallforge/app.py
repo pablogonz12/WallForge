@@ -300,7 +300,7 @@ class Window(Adw.ApplicationWindow):
         row = Adw.ActionRow(title="Monitor")
         row.add_suffix(self.out_dd)
         grp.add(row)
-        if it.kind in ("scene", "video"):
+        if it.kind in ("scene", "video", "web"):
             vol = Adw.SpinRow.new_with_range(0, 100, 5)
             vol.set_title("Volume")
             vol.set_subtitle("For this wallpaper only")
