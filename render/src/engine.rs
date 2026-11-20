@@ -117,6 +117,9 @@ pub struct Engine {
     prov: HashMap<i64, usize>,          // scene object id -> layer index (render target producers)
     frame_state: Vec<u8>,               // per frame: 0 not rendered, 1 in progress (cycle guard), 2 done
     frame_tex: Vec<Option<(u32, i32, i32)>>,
+    audio: Option<crate::audiocap::Capture>,
+    audio_tried: bool,
+    spec: crate::audiocap::Snapshot,
 }
 
 /// `_rt_imageLayerComposite_<id>_a` -> Some(id): another layer's rendered output.
@@ -177,12 +180,25 @@ impl Engine {
         }
         let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_pm: loc(prog, "pm"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
             vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
-            out, screen: out, main_rt: None, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], texts: vec![], parts: Default::default(), prov: HashMap::new(), frame_state: vec![], frame_tex: vec![] };
+            out, screen: out, main_rt: None, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], texts: vec![], parts: Default::default(), prov: HashMap::new(), frame_state: vec![], frame_tex: vec![],
+            audio: None, audio_tried: false, spec: crate::audiocap::Snapshot::ZERO };
         e.rebuild();
         Ok(e)
     }
 
     pub fn set_time(&mut self, t: Option<f32>) { self.time_override = t; }
+
+    /// Screenshot mode draws its frames back to back; give the capture thread a moment to deliver
+    /// the first spectrum so audio-reactive effects are not photographed before they wake up.
+    pub fn wait_audio(&mut self, max: std::time::Duration) {
+        let Some(a) = &self.audio else { return };
+        let t0 = std::time::Instant::now();
+        while t0.elapsed() < max {
+            self.spec = a.snapshot();
+            if self.spec.s64a.iter().any(|&v| v > 0.01) { return; }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
 
     pub fn resize(&mut self, out: (i32, i32)) { if out != self.out { self.out = out; self.rebuild(); } }
 
@@ -363,6 +379,13 @@ impl Engine {
             } }
         }
         for m in missing { self.note(m); }
+        // Only pay for capture when some effect actually samples the audio spectrum; never when the
+        // user turned audio processing off.
+        let wants_audio = self.layers.iter().any(|l| l.passes.iter().any(|p| p.uniforms.iter().any(|(u, _)| u.name.starts_with("g_AudioSpectrum"))));
+        if wants_audio && !self.audio_tried && !crate::audiocap::DISABLED.load(std::sync::atomic::Ordering::Relaxed) {
+            self.audio_tried = true;
+            self.audio = crate::audiocap::Capture::start();
+        }
         eprintln!("wallforge-render: scene {}x{} -> {}x{}: {} layers, {} with effects, texture+fbo memory {:.1} MiB, animated={}",
             self.scene_wh.0, self.scene_wh.1, self.out.0, self.out.1, self.layers.len(), self.layers.iter().filter(|l| !l.passes.is_empty()).count(), self.vram as f64 / 1048576.0, self.animated);
     }
@@ -475,6 +498,7 @@ impl Engine {
     pub fn tick(&mut self) {
         let fixed = self.time_override.map(|t| t as f64);
         for v in &mut self.videos { v.update(fixed); }
+        if let Some(a) = &self.audio { self.spec = a.snapshot(); }
     }
 
     fn set_uniform(&self, u: &Uniform, l: i32, p: &Pass, mvp: &Mat4, t: f32, tex_res: &[(f32, f32)]) {
@@ -487,9 +511,15 @@ impl Engine {
                 }
                 if let Ok(i) = n.parse::<i32>() { gl::Uniform1i(l, i); return; }
             }
-            if let Some(n) = name.strip_prefix("g_AudioSpectrum") { // no audio capture: idle (all-zero) spectrum
-                let n: usize = n.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(16);
-                let z = vec![0.0f32; n.min(64)]; gl::Uniform1fv(l, z.len() as i32, z.as_ptr()); return;
+            if let Some(n) = name.strip_prefix("g_AudioSpectrum") {
+                let digits: String = n.chars().take_while(|c| c.is_ascii_digit()).collect();
+                let size = digits.parse::<usize>().unwrap_or(16);
+                let bands = self.spec.spectrum(size, &n[digits.len()..]);
+                if !bands.is_empty() {
+                    gl::Uniform1fv(l, bands.len() as i32, bands.as_ptr()); return;
+                }
+                let z = [0.0f32; 64]; let c = size.min(64).max(1);
+                gl::Uniform1fv(l, c as i32, z.as_ptr()); return;
             }
             match name {
                 "g_ModelViewProjectionMatrix" | "g_EffectTextureProjectionMatrix" | "g_ViewProjectionMatrix" | "g_ModelMatrix" => {

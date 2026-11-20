@@ -247,6 +247,7 @@ fn screenshot(args: &Args, vfs: Vfs, scn: Scene, path: &Path) {
                     ((h as f64 * args.scale as f64 / 100.0).round().max(1.0)) as i32);
     let mut engine = Engine::new(vfs, scn, (iw, ih), args.scaling).unwrap_or_else(|e| fatal(&e));
     engine.set_screen((w, h));
+    engine.wait_audio(std::time::Duration::from_millis(900));
     // two warm-up frames at t-ε so ping-pong/time-dependent state settles, last frame at the requested time
     let t = args.shot_time;
     for i in 0..3 {
