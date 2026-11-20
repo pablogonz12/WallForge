@@ -465,6 +465,32 @@ mod tests {
             _ => return None,
         }.to_string())
     }
+    fn tr(vert: &str, frag: &str) -> Translated { Translated { vert: vert.into(), frag: frag.into(), uniforms: vec![], uses_time: false, combos: BTreeMap::new() } }
+    #[test]
+    fn repairs_hlsl_conversions() {
+        // float %, scalar chain on the left
+        assert_eq!(fix_mod("float d = abs((x.x * n % 1.0) * 2.0);"), "float d = abs((wf_mod(x.x * n, 1.0)) * 2.0);");
+        // float array index
+        assert_eq!(fix_index("a = s[g_C] + t[2];"), "a = s[int(g_C)] + t[2];");
+        // truncation / narrowing / widening on init
+        assert_eq!(fix_assign("\tvec2 c = v_TexCoord;", "vec4", "vec2"), "\tvec2 c = vec2(v_TexCoord);");
+        assert_eq!(fix_assign("float p = a * b;", "vec2", "float"), "float p = float(a * b);");
+        assert_eq!(fix_assign("for (int i = u_Min; i < 3; i++) {", "float", "int"), "for (int i = int(u_Min); i < 3; i++) {");
+        assert_eq!(fix_assign("vec4 c = v;", "vec2", "vec4"), "vec4 c = vec4(v, 0.0, 0.0);");
+        // int symbols in float arithmetic, not as call args
+        assert_eq!(fix_float("x = f / N * g(N);", &["N".to_string()]), "x = f / float(N) * g(N);");
+        // driven by the info log
+        let mut t = tr("", "void main() {\n\tvec3 c = vec4(1.0);\n\tfloat f = v[g];\n}\n");
+        assert!(repair(&mut t, "fragment: 0:2(2): error: initializer of type vec4 cannot be assigned to variable of type vec3\n0:3(14): error: array index must be integer type"));
+        assert!(t.frag.contains("vec3 c = vec3(vec4(1.0));") && t.frag.contains("v[int(g)]"));
+        // varying width mismatch widens both stages
+        let mut t = tr("varying vec4 v_T;\n", "varying vec2 v_T;\n");
+        assert!(repair(&mut t, "link: error: vertex shader output `v_T' declared as type `vec4', but fragment shader input declared as type `vec2'"));
+        assert_eq!((t.vert.as_str(), t.frag.as_str()), ("varying vec4 v_T;\n", "varying vec4 v_T;\n"));
+        assert!(!repair(&mut t, "fragment: 0:1(1): error: something else"));
+        // prelude carries the mismatched mix / float mod overloads
+        assert!(PRE.contains("vec3 wf_mix(vec3 a, vec3 b, vec4 t)") && PRE.contains("float wf_mod(float a, float b)"));
+    }
     #[test]
     fn translates_sample() {
         let t = translate(&fs, "effects/test", &Map::new(), &[], false).unwrap();
