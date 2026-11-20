@@ -220,16 +220,18 @@ impl Engine {
             let mut fbo_div: HashMap<String, f32> = HashMap::new();
             let effects: Vec<_> = effects.into_iter().take(std::env::var("WF_MAXFX").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX)).collect();
             let only: Option<usize> = std::env::var("WF_ONLYFX").ok().and_then(|v| v.parse().ok()); let effects: Vec<_> = effects.into_iter().enumerate().filter(|(i, _)| only.map_or(true, |o| o == *i)).map(|x| x.1).collect();
+            let mut drop_all = false;
             for (file, ename, ovs) in effects {
                 let Some(ed) = scene::load_effect(&self.vfs, &file) else { self.note(format!("layer '{name}': effect {file} not found, skipped")); continue };
                 for f in &ed.fbos { fbo_div.insert(f.name.clone(), f.scale.max(1.0)); }
                 let mut built = vec![];
                 let mut ok = true;
                 for (pi, ep) in ed.passes.iter().enumerate() {
-                    match self.build_pass(&ename, ep, ovs.get(pi), &mut cache, s3tc, (px.0 as u32, px.1 as u32)) { Ok(p) => built.push(p), Err(e) => { self.note(format!("layer '{name}': effect {file} pass {pi}: {e}; effect skipped")); ok = false; break; } }
+                    match self.build_pass(&ename, ep, ovs.get(pi), &mut cache, s3tc, (px.0 as u32, px.1 as u32)) { Ok(p) => built.push(p), Err(e) => { if full && e.contains("render target") { drop_all = true; } self.note(format!("layer '{name}': effect {file} pass {pi}: {e}; effect skipped")); ok = false; break; } }
                 }
                 if ok { layer.passes.extend(built); }
             }
+            if drop_all { layer.passes.clear(); self.note(format!("layer '{name}': composition depends on other layers' render targets; all its effects skipped")); }
             if !layer.passes.is_empty() {
                 let (w, h) = (px.0.clamp(1, 4096), px.1.clamp(1, 4096));
                 let (w, h) = (w, h);
@@ -325,6 +327,7 @@ impl Engine {
         } }
         let mut textures = vec![]; let mut uvr: Vec<[f32; 2]> = vec![]; let mut binds = vec![(0usize, "previous".to_string())];
         if let Some(mx) = ep.bind.iter().map(|b| b.1 + 1).max() { if names.len() < mx { names.resize(mx, None); } }
+        if let Some((i, n)) = names.iter().enumerate().find(|(i, n)| n.as_deref().map_or(false, |n| n.starts_with("_rt_imageLayerComposite")) && !ep.bind.iter().any(|b| b.1 == *i)) { return Err(format!("samples another layer's render target ({}) in slot {i}, which is not supported", n.as_deref().unwrap_or(""))); }
         for (i, n) in names.iter().enumerate() {
             let bound = ep.bind.iter().find(|b| b.1 == i).map(|b| b.0.clone());
             if let Some(b) = bound { binds.retain(|x| x.0 != i); binds.push((i, b)); textures.push(None); uvr.push([1.0, 1.0]); continue; }
