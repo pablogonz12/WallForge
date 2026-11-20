@@ -11,7 +11,8 @@
 
 <p align="center"><img src="assets/demo.gif" alt="A scene wallpaper with a fluid-simulation effect, rendered live by WallForge" width="760"></p>
 
-<p align="center"><sub>Recorded from the renderer: a Wallpaper Engine scene with a multi-pass fluid simulation, no post-processing.</sub></p>
+<p align="center"><sub>Recorded from the renderer: a Wallpaper Engine scene with a multi-pass fluid simulation, no post-processing.<br>
+<a href="https://github.com/pgm1207/WallForge/releases/download/v0.6.0/demo.mp4">Same clip as video (mp4, 5 s)</a></sub></p>
 
 **WallForge** is a GTK4 / libadwaita app *and* the renderer behind it. It plays the
 [Wallpaper Engine](https://store.steampowered.com/app/431960/) wallpapers you already own on any Wayland desktop with
@@ -60,13 +61,14 @@ approximate, is in [docs/compatibility.md](docs/compatibility.md).
 
 ## Performance
 
-Measured on a Ryzen 9 9900X with a Radeon RX 9070 (RADV), 3840×2160 output, 30 fps, one wallpaper:
+Measured on a Ryzen 9 9900X with a Radeon RX 9070 (RADV), 3840×2160 output, default 30 fps, one wallpaper.
+`tools/bench.sh <workshop-id>` reproduces the whole table on your own machine, including the idle GPU baseline.
 
-| Wallpaper | CPU (one core) | GPU | Renderer memory |
-|---|---|---|---|
-| 4K video, hardware decoded | ~2% | ~6% (idle desktop is ~5%) | 137 MB |
-| Static scene | ~1% | idle: drawn once, then sleeps | 108 MB |
-| Fluid-simulation scene (19 effect passes) | ~4% | ~20% | 297 MB |
+| Wallpaper | CPU (one core) | GPU | Process RSS | Scene textures |
+|---|---|---|---|---|
+| 4K video, hardware decoded | ~1% | ~5% (idle desktop is ~3%) | 135 MB | — |
+| Static scene | ~0% | drawn once, then sleeps | 107 MB | 32 MB |
+| Fluid-simulation scene (19 effect passes) | ~2% | ~14% | 124 MB | 142 MB |
 
 Settings that trade a little sharpness for a lot less GPU time:
 
