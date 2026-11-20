@@ -51,8 +51,9 @@ def build_web_args(cfg, item: library.Item, output: str, overrides: dict | None 
     vals = dict(item.defaults())
     vals.update(cfg.values_for(item.id))
     vals.update(overrides or {})
+    fps, _scale = effective(cfg)
     a = [sys.executable, "-m", "wallforge.webplayer", "--output", output, "--bg", str(item.run_dir),
-         "--fps", str(e["fps"]), "--layer", e.get("layer", "bottom")]
+         "--fps", str(fps), "--layer", e.get("layer", "bottom")]
     vol = cfg.volume_for(item.id)
     a += ["--volume", str(vol)] if vol else ["--silent"]
     if not e.get("disable_mouse", True):
