@@ -32,7 +32,8 @@ not listed here, please [report it](troubleshooting.md#reporting-a-wallpaper-tha
 | Solid colour layers, fullscreen and composition layers | Yes |
 | Layer blend modes | Normal, additive, multiply, screen; others draw as normal |
 | Effects (multi-pass, with their buffers and masks) | Yes, including Workshop effects that bring their own shaders |
-| Textures: RGBA, DXT1/3/5, RG88, R8, embedded PNG / JPEG / GIF, sprite sheets | Yes |
+| Textures: RGBA, DXT1/3/5, RG88, R8, embedded PNG / JPEG / GIF, sprite sheets | Yes. Sprite-sheet scenes work even when the texture header's size disagrees with the stored mip |
+| GIF-template scenes (one animated sprite sheet filling the screen) | Yes |
 | Embedded video layers | Yes (their sound is not played) |
 | Particle systems | Sprites with the common emitters, initializers and operators. Trails and ropes draw as plain sprites; control points, child systems and vortex forces are ignored |
 | Text layers | Yes. Texts driven by a clock or date script show the current time; other scripted texts show their starting value |

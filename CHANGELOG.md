@@ -26,6 +26,8 @@ The app is now called **WallForge**. Commands, paths and the app id are unchange
 - Layer `alignment` is honoured, which fixes layers that sat half off-screen and left black areas.
 - Effects that move vertices (foliage sway and similar) draw the whole layer instead of a strip.
 - Samplers fall back to their default texture when nothing is bound.
+- Sprite-sheet scenes (GIF-template wallpapers) render the right frame at the right size, including textures whose
+  header size disagrees with the stored mip.
 - "Disable particles" in Settings now applies to the native renderer.
 
 ### Documentation
