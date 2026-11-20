@@ -67,6 +67,15 @@ WallForge's renderer stops drawing whenever the compositor says the wallpaper is
 resumes where it stopped. The "Keep playing under fullscreen apps" switch only applies to the optional
 `linux-wallpaperengine` fallback.
 
+**The wallpaper uses too much GPU, or the fans spin up.**
+Lower Settings > Effects and power > Render resolution to 75% or 50% (scenes only; videos play at native size), set
+the frame rate limit to 24–30, and turn off particles if you do not need them. "Reduce frame rate and resolution on
+battery" does this automatically while discharging.
+
+**A wallpaper stopped and the playing bar says "stopped after repeated crashes".**
+The renderer died three times in five minutes and WallForge stopped retrying to avoid a restart loop. The reason is in
+the log (Settings > About > View log); send it with a bug report. Pressing play on the wallpaper starts it again.
+
 **Wallpapers are gone after logging in.**
 Turn on Settings > Desktop > Restore wallpapers at login. If your compositor ignores XDG autostart entries, run
 `/path/to/wallforge.sh --restore` from its startup configuration.
