@@ -59,6 +59,12 @@ impl Props {
         }
     }
     pub fn floats(&self, v: Option<&Value>) -> Option<Vec<f32>> { floats(&self.resolve(v?)) }
+    /// Like `boolean`, but honours the common `applyUserProperties` visibility script.
+    pub fn visible(&self, v: Option<&Value>) -> bool {
+        if let Some(x) = v { if let Some(u) = x.get("user").and_then(|u| u.as_str()) {
+            if let Some(b) = crate::scriptvis::script_visible(x, self.map.get(u).and_then(|p| p.as_bool())) { return b; } } }
+        self.boolean(v, true)
+    }
     pub fn boolean(&self, v: Option<&Value>, d: bool) -> bool {
         match v.map(|x| self.resolve(x)) {
             Some(Value::Bool(b)) => b, Some(Value::Number(n)) => n.as_f64().unwrap_or(0.0) != 0.0,
@@ -84,7 +90,7 @@ fn v3(v: Option<Vec<f32>>, d: [f32; 3]) -> [f32; 3] {
 pub struct PassOv { pub constants: Map<String, Value>, pub textures: Vec<Option<String>>, pub combos: Map<String, Value> }
 pub struct EffectRef { pub file: String, pub name: String, pub passes: Vec<PassOv> }
 
-pub enum Kind { Image { model: String }, Particle { file: String, ov: Vec<(String, Vec<f32>)> }, Sound { files: Vec<String> }, Light, Group, Other(String) }
+pub enum Kind { Image { model: String }, Particle { file: String, ov: Vec<(String, Vec<f32>)> }, Sound { files: Vec<String> }, Light, Group, Other(String), Text(Box<crate::text::TextDef>) }
 
 /// WE `alignment`: which point of the layer the origin refers to; returns the quad centre offset in layer sizes.
 pub fn align_of(a: &str) -> [f32; 2] {
@@ -110,7 +116,8 @@ pub struct Scene {
 pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
     let g = j.get("general").ok_or("scene.json: no \"general\"")?;
     let mut fatal = vec![]; let mut warnings = vec![];
-    let (width, height) = match g.get("orthogonalprojection") {
+    let auto_size = g.get("orthogonalprojection").map_or(false, |o| o.get("width").map_or(true, |v| v.is_null()) || o.get("height").map_or(true, |v| v.is_null()));
+    let (mut width, mut height) = match g.get("orthogonalprojection") {
         Some(o) => (props.floats(o.get("width")).and_then(|v| v.first().copied()).unwrap_or(1920.0),
                     props.floats(o.get("height")).and_then(|v| v.first().copied()).unwrap_or(1080.0)),
         None => { fatal.push("perspective (3D) camera".into()); (1920.0, 1080.0) }
@@ -119,11 +126,12 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
     let mut objects = vec![];
     for o in j.get("objects").and_then(|v| v.as_array()).ok_or("scene.json: no objects")? {
         let name = o.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if !props.boolean(o.get("visible"), true) { continue; }
+        if !props.visible(o.get("visible")) { continue; }
         let id = o.get("id").and_then(|v| v.as_i64()).unwrap_or(-1);
         let kind = if let Some(i) = o.get("image").and_then(|v| v.as_str()) { Kind::Image { model: i.to_string() }
             } else if let Some(p) = o.get("particle").and_then(|v| v.as_str()) { Kind::Particle { file: p.to_string(), ov: o.get("instanceoverride").and_then(|v| v.as_object()).map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), props.floats(Some(v))?))).collect()).unwrap_or_default() }
             } else if let Some(s) = o.get("sound").and_then(|v| v.as_array()) { Kind::Sound { files: s.iter().filter_map(|x| x.as_str().map(String::from)).collect() }
+            } else if o.get("text").is_some() && o.get("font").is_some() { match crate::text::parse(o, &|v| props.resolve(v)) { Some(t) => Kind::Text(Box::new(t)), None => Kind::Group }
             } else if o.get("light").is_some() { Kind::Light
             } else if let Some(m) = o.get("model").and_then(|v| v.as_str()) {
                 if m.ends_with(".mdl") || m.ends_with(".json") { fatal.push(format!("3D model object '{name}'")); }
@@ -160,6 +168,8 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
             align: align_of(o.get("alignment").and_then(|v| v.as_str()).unwrap_or("center")),
         });
     }
+    // auto projection (GIF-template scenes: width/height null): the scene is as large as its biggest sized layer
+    if auto_size { if let Some(sz) = objects.iter().filter(|o| matches!(o.kind, Kind::Image { .. })).filter_map(|o| o.size.map(|s| [s[0] * o.scale[0].abs(), s[1] * o.scale[1].abs()])).max_by(|a, b| (a[0] * a[1]).total_cmp(&(b[0] * b[1]))) { if sz[0] > 0.0 && sz[1] > 0.0 { width = sz[0]; height = sz[1]; } } }
     Ok(Scene { width, height, clear, objects, fatal, warnings })
 }
 
