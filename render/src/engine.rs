@@ -90,6 +90,7 @@ struct Pass {
     prog: u32,
     uniforms: Vec<(Uniform, i32)>,
     values: HashMap<String, Vec<f32>>, // material key -> value
+    uvr: Vec<[f32; 2]>, // unit -> image fraction of the (padded) texture, for g_TextureNResolution.zw
     textures: Vec<Option<(u32, (u32, u32))>>, // unit -> static texture (None: previous / bound by name)
     binds: Vec<(usize, String)>,               // unit -> named source ("previous" or fbo name)
     target: Option<String>,
@@ -209,6 +210,7 @@ impl Engine {
             self.vram += gt.bytes;
             if std::env::var("WF_DBG").is_ok() { eprintln!("vram: layer '{name}' tex {:.1} MiB ({}x{}) px {:?}", gt.bytes as f64 / 1048576.0, gt.w, gt.h, px); }
             let world = world_of(&self.scene.objects, i, 0);
+            let world = { let al = self.scene.objects[i].align; if al == [0.0, 0.0] { world } else { scene::mul(&world, &scene::trs([al[0] * size[0], al[1] * size[1], 0.0], [1.0; 3], 0.0)) } };
             let mut layer = Layer { name: name.clone(), tex: gt.id, size, world, color, alpha, uvs: gt.uv, frames, tex_wh, full, blend: blend_of(blend_o.as_deref().unwrap_or(&def.material.blending)),
                 passes: vec![], ping: None, named: HashMap::new(), px };
             if def.material.blending == "additive" { layer.blend = Blend::Additive; }
@@ -216,6 +218,7 @@ impl Engine {
             let effects: Vec<_> = self.scene.objects[i].effects.iter().map(|e| (e.file.clone(), e.name.clone(), e.passes.iter().map(|p| (p.constants.clone(), p.textures.clone(), p.combos.clone())).collect::<Vec<_>>())).collect();
             let mut fbo_div: HashMap<String, f32> = HashMap::new();
             let effects: Vec<_> = effects.into_iter().take(std::env::var("WF_MAXFX").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX)).collect();
+            let only: Option<usize> = std::env::var("WF_ONLYFX").ok().and_then(|v| v.parse().ok()); let effects: Vec<_> = effects.into_iter().enumerate().filter(|(i, _)| only.map_or(true, |o| o == *i)).map(|x| x.1).collect();
             for (file, ename, ovs) in effects {
                 let Some(ed) = scene::load_effect(&self.vfs, &file) else { self.note(format!("layer '{name}': effect {file} not found, skipped")); continue };
                 for f in &ed.fbos { fbo_div.insert(f.name.clone(), f.scale.max(1.0)); }
@@ -279,6 +282,7 @@ impl Engine {
             self.shader_cache.insert(key.clone(), r.ok());
         }
         let tr = self.shader_cache.get(&key).and_then(|t| t.as_ref()).ok_or_else(|| format!("shader '{}' unavailable", mat.shader))?;
+        if let Ok(d) = std::env::var("WF_DUMP_ALL") { let n = mat.shader.replace('/', "_"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(format!("{d}/{n}.frag"), &tr.frag); let _ = std::fs::write(format!("{d}/{n}.vert"), &tr.vert); }
         let retry = match link(&tr.vert, &tr.frag) {
             Ok(p) => Ok((p, None)),
             Err(e1) => {
@@ -318,10 +322,11 @@ impl Engine {
         for u in &tr.uniforms { if let (Some(i), Some(d)) = (u.name.strip_prefix("g_Texture").and_then(|n| n.parse::<usize>().ok()), u.default.as_ref().and_then(|d| d.as_str())) {
             if i > 0 && u.ty == "sampler2D" && !d.is_empty() { if names.len() <= i { names.resize(i + 1, None); } if names[i].is_none() { names[i] = Some(d.to_string()); } }
         } }
-        let mut textures = vec![]; let mut binds = vec![(0usize, "previous".to_string())];
+        let mut textures = vec![]; let mut uvr: Vec<[f32; 2]> = vec![]; let mut binds = vec![(0usize, "previous".to_string())];
+        if let Some(mx) = ep.bind.iter().map(|b| b.1 + 1).max() { if names.len() < mx { names.resize(mx, None); } }
         for (i, n) in names.iter().enumerate() {
             let bound = ep.bind.iter().find(|b| b.1 == i).map(|b| b.0.clone());
-            if let Some(b) = bound { binds.retain(|x| x.0 != i); binds.push((i, b)); textures.push(None); continue; }
+            if let Some(b) = bound { binds.retain(|x| x.0 != i); binds.push((i, b)); textures.push(None); uvr.push([1.0, 1.0]); continue; }
             match n {
                 Some(n) if !n.starts_with("_rt_") => {
                     let path = scene::tex_file(n);
@@ -329,12 +334,12 @@ impl Engine {
                         let r = self.vfs.read(&path).and_then(|b| tex::parse(&b, false).ok()).and_then(|t| tex::upload(&t, want.0, want.1, &TexMeta::default(), s3tc).ok());
                         cache.insert(path.clone(), r);
                     }
-                    match cache.get(&path).and_then(|x| x.as_ref()) { Some(g) => textures.push(Some((g.id, (g.w, g.h)))), None => return Err(format!("texture {path} not found")) }
+                    match cache.get(&path).and_then(|x| x.as_ref()) { Some(g) => { textures.push(Some((g.id, (g.w, g.h)))); uvr.push(g.uv) }, None => return Err(format!("texture {path} not found")) }
                 }
-                _ => textures.push(None),
+                _ => { textures.push(None); uvr.push([1.0, 1.0]) },
             }
         }
-        Ok(Pass { prog, uniforms, values, textures, binds, target: ep.target.clone(), time: tr.uses_time })
+        Ok(Pass { prog, uniforms, values, uvr, textures, binds, target: ep.target.clone(), time: tr.uses_time })
     }
 
     /// Stage-2 hook: audio spectrum / particle simulation step goes here.
@@ -348,7 +353,7 @@ impl Engine {
         unsafe {
             if let Some(n) = name.strip_prefix("g_Texture") {
                 if let Some(n) = n.strip_suffix("Resolution") {
-                    if let Ok(i) = n.parse::<usize>() { let (w, h) = tex_res.get(i).copied().unwrap_or((1.0, 1.0)); gl::Uniform4f(l, w, h, w, h); }
+                    if let Ok(i) = n.parse::<usize>() { let (w, h) = tex_res.get(i).copied().unwrap_or((1.0, 1.0)); let f = p.uvr.get(i).copied().unwrap_or([1.0, 1.0]); gl::Uniform4f(l, w, h, w * f[0], h * f[1]); }
                     return;
                 }
                 if let Ok(i) = n.parse::<i32>() { gl::Uniform1i(l, i); return; }
@@ -446,7 +451,8 @@ impl Engine {
         // the fullscreen effect quad: vertex positions are [-1,1] already, so the MVP is the identity
         let mut cur = (a, b); // cur.0 holds "previous", cur.1 is the destination
         let ident = scene::ident();
-        for p in &l.passes {
+        let dbg_n: usize = std::env::var("WF_PASSN").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX); let mut dbg_last: Option<u32> = None;
+        for p in l.passes.iter().take(dbg_n) {
             let dst = match &p.target { Some(n) => l.named.get(n).unwrap_or(cur.1), None => cur.1 };
             unsafe {
                 gl::BindFramebuffer(gl::FRAMEBUFFER, dst.fbo);
@@ -464,10 +470,24 @@ impl Engine {
                 res.push(r);
                 unsafe { gl::ActiveTexture(gl::TEXTURE0 + unit as u32); gl::BindTexture(gl::TEXTURE_2D, id); }
             }
-            for (u, lc) in &p.uniforms { self.set_uniform(u, *lc, p, &ident, t, &res); }
+            // vertex-displacing effects (foliagesway, ...) work in scene units: give them a quad of the layer's size and a matching MVP
+            let pix = p.uniforms.iter().any(|(u, _)| u.name == "g_ModelViewProjectionMatrix") && l.size[0] > 0.0 && l.size[1] > 0.0;
+            let mut emvp = ident;
+            if pix {
+                let (hw, hh) = (l.size[0] * 0.5, l.size[1] * 0.5);
+                let v: [f32; 20] = [-hw, -hh, 0.0, 0.0, 0.0, hw, -hh, 0.0, 1.0, 0.0, -hw, hh, 0.0, 0.0, 1.0, hw, hh, 0.0, 1.0, 1.0];
+                emvp[0] = 1.0 / hw; emvp[5] = 1.0 / hh;
+                unsafe { let mut vb = 0; gl::GetVertexAttribiv(0, gl::VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &mut vb); gl::BindBuffer(gl::ARRAY_BUFFER, vb as u32); gl::BufferSubData(gl::ARRAY_BUFFER, 0, 80, v.as_ptr() as *const _); }
+            }
+            for (u, lc) in &p.uniforms { self.set_uniform(u, *lc, p, &emvp, t, &res); }
             unsafe { gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4); }
-            if p.target.is_none() { cur = (cur.1, cur.0); }
+            if pix {
+                let v: [f32; 20] = [-1.0, -1.0, 0.0, 0.0, 0.0, 1.0, -1.0, 0.0, 1.0, 0.0, -1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0];
+                unsafe { gl::BufferSubData(gl::ARRAY_BUFFER, 0, 80, v.as_ptr() as *const _); }
+            }
+            if p.target.is_none() { cur = (cur.1, cur.0); dbg_last = None; } else { dbg_last = Some(dst.tex); }
         }
+        if let Some(t) = dbg_last { return t; }
         unsafe { gl::ActiveTexture(gl::TEXTURE0); }
         cur.0.tex
     }
