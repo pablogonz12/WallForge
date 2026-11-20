@@ -113,10 +113,12 @@ Settings that trade a little sharpness for a lot less GPU time:
 
 ### Rotation
 
-Settings > Playback > **Change wallpaper every** switches all screens to a new wallpaper every N minutes (0 turns it
-off). *Pick a random wallpaper* chooses at random; with it off, the library order is followed. *Rotate only through
-favourites* keeps the rotation to wallpapers you starred. Rotation waits while wallpapers are paused by battery saving,
-never picks a wallpaper that is already showing, and leaves screens you stopped by hand stopped.
+Settings > Playback > **Change wallpaper every** switches to a new wallpaper every N minutes (0 turns it off).
+*Pick a random wallpaper* chooses at random; with it off, the library order is followed. *Rotate only through
+favourites* keeps the rotation to wallpapers you starred. *Give each screen its own wallpaper* rotates each monitor
+independently, so two screens get two different wallpapers; with it off they all change to the same one. Rotation
+waits while wallpapers are paused by battery saving, never picks a wallpaper that is already showing, and leaves
+screens you stopped by hand stopped. **Ctrl+Shift+N** switches now without waiting for the timer.
 
 If a wallpaper stops on its own, WallForge restarts it; after three failures in five minutes it leaves the screen idle
 and says so in the playing bar instead of looping on a crash. The log is under Settings > About > View log.

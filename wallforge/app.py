@@ -418,7 +418,7 @@ class Window(Adw.ApplicationWindow):
         self.toasts.add_toast(Adw.Toast(title="Settings reset to the wallpaper's defaults"))
 
     # ------------------------------------------------------------------ apply
-    def apply(self, outputs: list[str], quiet=False, it: library.Item | None = None):
+    def apply(self, outputs: list[str], quiet=False, it: library.Item | None = None, sync=True):
         it = it or self.sel
         if not it or it.broken:
             self.toasts.add_toast(Adw.Toast(title=it.broken if it else "Nothing selected"))
@@ -461,7 +461,7 @@ class Window(Adw.ApplicationWindow):
                     self.cfg.data["outputs"][o] = {"id": it.id}
                     self._remember(o, it.id)
                 self.cfg.save()
-                if outputs:
+                if sync and outputs:
                     theme.sync(self.cfg, it, outputs[0] if len(outputs) == 1 else None)
             except Exception as e:
                 err = str(e)
@@ -594,11 +594,52 @@ class Window(Adw.ApplicationWindow):
             web_missing=bool(engine.web_missing()),
         )
 
-    def _next_rotated(self):
+    def _next_rotated(self, skip=()):
         """The wallpaper a timer tick should switch to, avoiding what is already showing."""
         cur = {v.get("id") for v in self.cfg.data["outputs"].values() if v.get("id")}
-        return rotation.next_item(self._rotate_pool(), cur,
+        return rotation.next_item(self._rotate_pool(), cur | set(skip),
                                   shuffle=bool(self.cfg.data.get("rotate_shuffle", True)))
+
+    def _rotate_step(self):
+        """Switch the screens to new wallpapers, one pick per screen unless that is turned off."""
+        pool = self._rotate_pool()
+        if not pool:
+            return
+        names = [o["name"] for o in (self._mons or monitors.outputs())]
+        outs = [o for o in names if self.cfg.data["outputs"].get(o, {}).get("id") and o not in self._stopped]
+        if not outs:
+            return
+        shuffle = bool(self.cfg.data.get("rotate_shuffle", True))
+        if not self.cfg.data.get("rotate_per_output", True):
+            it = rotation.next_item(pool, (), shuffle=shuffle)
+            if it:
+                self.sel = it
+                try:
+                    self.select(it)
+                except Exception:
+                    pass
+                self.apply(outs, it=it)
+            return
+        showing = {self.cfg.data["outputs"].get(o, {}).get("id") for o in names}
+        used: set[str] = set()
+        first = None
+        for out in outs:
+            cur = self.cfg.data["outputs"].get(out, {}).get("id")
+            avoid = (showing - {cur}) | used
+            cand = [i for i in pool if i.id not in avoid] or [i for i in pool if i.id != cur] or pool
+            it = rotation.next_item(cand, {cur} if cur else (), shuffle=shuffle)
+            if not it:
+                continue
+            used.add(it.id)
+            self.apply([out], it=it, sync=(first is None))
+            if first is None:
+                first = it
+        if first is not None:
+            self.sel = first
+            try:
+                self.select(first)
+            except Exception:
+                pass
 
     def _maybe_rotate(self):
         """Settings timer: change every wallpaper once the configured interval has passed."""
@@ -608,22 +649,17 @@ class Window(Adw.ApplicationWindow):
         now = time.time()
         if now - self._last_rotate < mins * 60:
             return
-        outs = [o["name"] for o in (self._mons or monitors.outputs())]
-        outs = [o for o in outs if self.cfg.data["outputs"].get(o, {}).get("id") and o not in self._stopped]
-        if not outs:
-            return
-        it = self._next_rotated()
         self._last_rotate = now
         self.cfg.data["last_rotate"] = now
         self.cfg.save()
-        if not it:
-            return
-        self.sel = it
-        try:
-            self.select(it)
-        except Exception:
-            pass
-        self.apply(outs, it=it)
+        self._rotate_step()
+
+    def rotate_now(self):
+        """Shortcut: switch to the next wallpaper(s) without waiting for the timer."""
+        self._last_rotate = time.time()
+        self.cfg.data["last_rotate"] = self._last_rotate
+        self.cfg.save()
+        self._rotate_step()
 
     def _shortcuts(self):
         ctl = Gtk.ShortcutController()
@@ -634,6 +670,7 @@ class Window(Adw.ApplicationWindow):
                                               Gtk.CallbackAction.new(lambda *_: (fn(), True)[1])))
         add("<Control>f", lambda: (self.stack.set_visible_child_name("library"), self.search.grab_focus()))
         add("<Control>r", self.random_wallpaper)
+        add("<Control><Shift>n", self.rotate_now)
         add("<Control>comma", self.show_settings)
         add("F5", lambda: self.reload_library(toast=True))
         add("Escape", lambda: self.split.set_show_sidebar(False))
@@ -1084,6 +1121,8 @@ class Window(Adw.ApplicationWindow):
         g1.add(rot)
         top_switch(g1, "Pick a random wallpaper when it changes", "rotate_shuffle", "Off: walk the library in order.")
         top_switch(g1, "Rotate only through favourites", "rotate_favorites")
+        top_switch(g1, "Give each screen its own wallpaper", "rotate_per_output",
+                   "On: monitors rotate independently. Off: all screens change to the same wallpaper.")
         g2 = Adw.PreferencesGroup(title="Effects and power")
         pg.add(g2)
         g1 = g2

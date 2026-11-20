@@ -5,7 +5,8 @@
 ### New
 
 - **Wallpaper rotation**: Settings > Playback changes the wallpaper every N minutes, at random or in library order,
-  optionally only through favourites.
+  optionally only through favourites and optionally with a different wallpaper on each screen. `Ctrl+Shift+N` rotates
+  immediately.
 
 ### Performance and battery
 
