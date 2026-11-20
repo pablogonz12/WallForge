@@ -794,7 +794,7 @@ class Window(Adw.ApplicationWindow):
     def refresh_playing(self):
         # The 3 s poll calls this constantly; skip the widget churn when nothing actually changed.
         state = tuple((o["name"], engine.running(o["name"]), self.cfg.data["outputs"].get(o["name"], {}).get("id"),
-                       o["name"] in self._crashed) for o in monitors.outputs())
+                       o["name"] in self._crashed) for o in monitors.outputs()) + (self.cfg.data.get("rotate_minutes") or 0,)
         if state == getattr(self, "_play_state", None):
             return
         self._play_state = state
@@ -828,6 +828,12 @@ class Window(Adw.ApplicationWindow):
                 lab.add_css_class("dim-label")
                 b.append(lab)
             self.play_box.append(b)
+        mins = int(self.cfg.data.get("rotate_minutes") or 0)
+        if mins > 0:
+            how = "a random one" if self.cfg.data.get("rotate_shuffle", True) else "the next one"
+            note = Gtk.Label(label=f"rotating to {how} every {mins} min · Ctrl+Shift+N for next")
+            note.add_css_class("dim-label")
+            self.play_box.append(note)
 
     # ------------------------------------------------------------------ discover
     def _build_discover(self):
