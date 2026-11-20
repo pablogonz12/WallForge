@@ -9,6 +9,7 @@ from pathlib import Path
 APPID = "431960"
 HOME = Path.home()
 DATA = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
+LOCAL_LIBRARY = DATA / "wallforge/library"
 OWN_ASSETS = DATA / "wallforge/assets"  # assets fetched by wallforge itself
 
 
@@ -123,3 +124,9 @@ def render_source() -> Path | None:
     """The render/ crate when running from a git checkout (so it can be built in place)."""
     d = Path(__file__).resolve().parent.parent / "render"
     return d if (d / "Cargo.toml").is_file() else None
+
+
+def local_dir() -> Path:
+    """User library of wallpapers added from outside the Workshop (WALLFORGE_LIBRARY overrides, for tests)."""
+    env = os.environ.get("WALLFORGE_LIBRARY")
+    return Path(env) if env else LOCAL_LIBRARY

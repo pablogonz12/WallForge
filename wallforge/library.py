@@ -25,6 +25,7 @@ class Item:
     raw: dict = field(default_factory=dict)
     broken: str | None = None  # reason it cannot run
     aspect: float | None = None  # wallpaper's own aspect ratio when known (scenes)
+    source: str = "Workshop"  # Workshop | Local | Lively
 
     # ---- resolution --------------------------------------------------------
     @property
@@ -138,7 +139,11 @@ def _scan_dir(root: Path) -> list[Item]:
             dependency=str(dep) if dep else None,
             preset=raw.get("preset") or {},
             raw=raw,
+            source=(str(raw.get("source") or "Local") if d.name.startswith("local-") and d.parent == paths.local_dir() else "Workshop"),
         )
+        f = raw.get("file")
+        if item.source != "Workshop" and isinstance(f, str) and not (d / f).exists():
+            item.broken = f"file {f} is missing (the original may have been moved)"
         if item.is_preset and not item.run_dir.is_dir():
             item.broken = f"base wallpaper {dep} is not downloaded"
         items.append(item)
@@ -201,7 +206,7 @@ def _check_scene(item: Item):
 def scan() -> list[Item]:
     items: list[Item] = []
     seen = set()
-    roots = paths.workshop_dirs() + [d / "projects/myprojects" for d in paths.we_dirs()]
+    roots = paths.workshop_dirs() + [d / "projects/myprojects" for d in paths.we_dirs()] + [paths.local_dir()]
     for root in roots:
         for it in _scan_dir(root):
             if it.id not in seen:

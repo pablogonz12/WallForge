@@ -32,6 +32,7 @@ from . import (  # noqa: E402
     rotation,
     theme,
     updater,
+    importer,
     weimport,
     workshop,
 )
@@ -136,6 +137,9 @@ class Window(Adw.ApplicationWindow):
         rnd = Gtk.Button(icon_name="media-playlist-shuffle-symbolic", tooltip_text="Random wallpaper (Ctrl+R)")
         rnd.connect("clicked", lambda _b: self.random_wallpaper())
         header.pack_start(rnd)
+        add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add wallpaper: video, image, HTML folder or Lively .zip")
+        add.connect("clicked", lambda _b: self._pick_import())
+        header.pack_start(add)
         tv.add_top_bar(header)
         self.banner = Adw.Banner(button_label="Set up", revealed=False)
         self.banner.connect("button-clicked", lambda _b: self.show_settings())
@@ -173,7 +177,7 @@ class Window(Adw.ApplicationWindow):
         bar = Gtk.Box(spacing=8, margin_top=8, margin_bottom=8, margin_start=12, margin_end=12)
         self.search = Gtk.SearchEntry(placeholder_text="Search installed wallpapers", hexpand=True)
         self.search.connect("search-changed", lambda *_: self.filter.changed(Gtk.FilterChange.DIFFERENT))
-        self.type_dd = Gtk.DropDown.new_from_strings(["All", "Scene", "Video", "Web", "Favorites"])
+        self.type_dd = Gtk.DropDown.new_from_strings(["All", "Scene", "Video", "Web", "Favorites", "Local"])
         self.type_dd.connect("notify::selected", lambda *_: self.filter.changed(Gtk.FilterChange.DIFFERENT))
         self.sort_dd = Gtk.DropDown.new_from_strings(["A to Z", "Newest first", "Favorites first"])
         self.sort_dd.connect("notify::selected", lambda *_: self.reload_library())
@@ -216,6 +220,8 @@ class Window(Adw.ApplicationWindow):
         mode = self.type_dd.get_selected_item().get_string()
         if mode == "Favorites":
             return it.id in self.cfg.data["favorites"]
+        if mode == "Local":
+            return it.source != "Workshop"
         if mode != "All" and it.kind != mode.lower():
             return False
         return True
@@ -301,7 +307,7 @@ class Window(Adw.ApplicationWindow):
         title = Gtk.Label(label=it.title, xalign=0, wrap=True)
         title.add_css_class("title-2")
         box.append(title)
-        meta = f"{it.kind}" + (" preset" if it.is_preset else "") + f"  |  id {it.id}"
+        meta = f"{it.kind}" + (" preset" if it.is_preset else "") + f"  |  id {it.id}" + (f"  |  {it.source}" if it.source != "Workshop" else "")
         ml = Gtk.Label(label=meta, xalign=0)
         ml.add_css_class("dim-label")
         box.append(ml)
@@ -355,6 +361,10 @@ class Window(Adw.ApplicationWindow):
                            if wid else "Not on the Steam Workshop, so there is no link to share")
         share.connect("clicked", lambda _b: self._share(wid))
         tools.append(fav)
+        if it.source != "Workshop" and importer.is_local(it.dir):
+            rm = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Remove from WallForge (the original file is kept)")
+            rm.connect("clicked", lambda _b: self._remove_local(it))
+            tools.append(rm)
         tools.append(share)
         tools.append(folder)
         tools.append(reset)
@@ -1069,6 +1079,13 @@ class Window(Adw.ApplicationWindow):
             now = {d.name for root in paths.workshop_dirs() for d in root.iterdir() if (d / "project.json").is_file()}
         except Exception:
             return True
+        try:  # items added from the command line while the app runs
+            loc = {d.name for d in paths.local_dir().iterdir() if (d / "project.json").is_file()}
+        except Exception:
+            loc = set()
+        if loc != {i.id for i in self.items if i.source != "Workshop"}:
+            self.reload_library()
+            return True
         have = {i.id for i in self.items if any(i.dir.is_relative_to(r) for r in paths.workshop_dirs())}
         if now != have:
             self.reload_library()
@@ -1295,6 +1312,42 @@ class Window(Adw.ApplicationWindow):
         g3.add(n)
         d.present(self)
 
+    def _pick_import(self):
+        dlg = Gtk.FileDialog(title="Add wallpaper")
+        flt = Gtk.FileFilter(name="Videos, images, HTML pages, Lively packages")
+        for e in sorted(importer.VIDEO_EXT | importer.IMAGE_EXT | {".zip", ".html", ".htm"}):
+            flt.add_suffix(e[1:])
+        store = Gio.ListStore.new(Gtk.FileFilter)
+        store.append(flt)
+        dlg.set_filters(store)
+
+        def done(dl, res):
+            try:
+                files = dl.open_multiple_finish(res)
+            except GLib.Error:
+                return
+            self._do_import([Path(files.get_item(i).get_path()) for i in range(files.get_n_items()) if files.get_item(i).get_path()])
+        dlg.open_multiple(self, None, done)
+
+    def _do_import(self, files):
+        for f in files:
+            try:
+                d = importer.import_path(f)
+                self.toasts.add_toast(Adw.Toast(title=f"Added {d.name}"))
+            except Exception as e:
+                self.toasts.add_toast(Adw.Toast(title=f"Could not add {f.name}: {e}"))
+        self.reload_library()
+
+    def _remove_local(self, it):
+        try:
+            importer.remove(it.dir)
+        except Exception as e:
+            self.toasts.add_toast(Adw.Toast(title=str(e)))
+            return
+        self.split.set_show_sidebar(False)
+        self.reload_library()
+        self.toasts.add_toast(Adw.Toast(title=f"Removed {it.title}"))
+
     def _pick_we(self):
         dlg = Gtk.FileDialog(title="Wallpaper Engine config.json")
         flt = Gtk.FileFilter(name="config.json")
@@ -1514,6 +1567,8 @@ def main():
         from . import doctor
 
         return doctor.main()
+    if "--import" in sys.argv:  # --import PATH... [--copy]
+        return importer.main(sys.argv[sys.argv.index("--import") + 1:])
     if "--import-we" in sys.argv:  # --import-we [config.json] [--dry-run]
         return weimport.main(sys.argv[sys.argv.index("--import-we") + 1:])
     return App().run([sys.argv[0]])
