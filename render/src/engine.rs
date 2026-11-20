@@ -29,8 +29,8 @@ fn compile(kind: u32, src: &str) -> Result<u32, String> {
         gl::CompileShader(s);
         let mut ok = 0; gl::GetShaderiv(s, gl::COMPILE_STATUS, &mut ok);
         if ok == 0 {
-            let mut buf = [0u8; 2048]; let mut n = 0;
-            gl::GetShaderInfoLog(s, 2048, &mut n, buf.as_mut_ptr() as *mut _);
+            let mut buf = [0u8; 8192]; let mut n = 0;
+            gl::GetShaderInfoLog(s, 8192, &mut n, buf.as_mut_ptr() as *mut _);
             gl::DeleteShader(s);
             return Err(String::from_utf8_lossy(&buf[..n as usize]).trim().to_string());
         }
@@ -283,7 +283,11 @@ impl Engine {
             Err(e1) => {
                 let vfs = &self.vfs;
                 match shader::translate(&|n| vfs.read_str(n), &mat.shader, &combos, &present, true) {
-                    Ok(t2) => { if std::env::var("WF_DBG").is_ok() { eprintln!("retry frag has float(: {}", t2.frag.contains("float(sampleCount)")); } match link(&t2.vert, &t2.frag) { Ok(p) => Ok((p, Some(t2))), Err(e2) => Err((e2, Some(t2))) } },
+                    Ok(mut t2) => { if std::env::var("WF_DBG").is_ok() { eprintln!("retry frag has float(: {}", t2.frag.contains("float(sampleCount)")); }
+                        // HLSL-style implicit conversions: patch the source from the info log and relink
+                        let mut r = link(&t2.vert, &t2.frag);
+                        for _ in 0..12 { match &r { Err(e) if shader::repair(&mut t2, e) => r = link(&t2.vert, &t2.frag), _ => break } }
+                        match r { Ok(p) => Ok((p, Some(t2))), Err(e2) => Err((e2, Some(t2))) } },
                     Err(e) => { eprintln!("wallforge-render: floatify retry translate failed: {e}"); Err((e1, None)) }
                 }
             }
