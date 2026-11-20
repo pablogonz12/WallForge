@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WallForge — Arch repository</title>
+<style>
+  :root { color-scheme: dark; --bg: #0b0d12; --fg: #e9eaf0; --dim: #9aa0b4; --accent: #c9587f; --card: #14161f; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
+  main { max-width: 46rem; margin: 4rem auto; padding: 0 1.5rem; }
+  h1 { font-size: 2rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.1rem; margin: 2.5rem 0 .75rem; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; }
+  p { color: var(--dim); }
+  a { color: #e9a8c0; }
+  pre { background: var(--card); border: 1px solid #242838; border-radius: .6rem; padding: 1rem 1.1rem; overflow-x: auto; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9rem; }
+  .lead { font-size: 1.05rem; }
+  footer { margin-top: 3rem; color: var(--dim); font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>WallForge</h1>
+  <p class="lead">Your Wallpaper Engine library on Wayland, played by one small Rust renderer.
+  This page serves the pacman repository.</p>
+
+  <h2>Install on Arch or CachyOS</h2>
+  <p>Add the repository once:</p>
+  <pre><code>sudo tee /etc/pacman.d/wallforge.conf &lt;&lt;'EOF'
+[wallforge]
+SigLevel = Optional
+Server = https://pgm1207.github.io/WallForge/arch/x86_64
+EOF
+grep -q wallforge.conf /etc/pacman.conf || echo 'Include = /etc/pacman.d/wallforge.conf' | sudo tee -a /etc/pacman.conf</code></pre>
+  <p>Then install and keep it updated like any other package:</p>
+  <pre><code>sudo pacman -Sy wallforge</code></pre>
+  <p>Packages are unsigned; <code>SigLevel = Optional</code> accepts them without a key. If you prefer, build from
+  source with the <a href="https://github.com/pgm1207/WallForge#from-source">install script</a> instead.</p>
+
+  <h2>What is in here</h2>
+  <p><code>arch/x86_64/</code> holds the package archive and the pacman database, rebuilt on every release.
+  The newest three versions are kept.</p>
+
+  <h2>Source and issues</h2>
+  <p><a href="https://github.com/pgm1207/WallForge">github.com/pgm1207/WallForge</a> ·
+  <a href="https://github.com/pgm1207/WallForge/releases">releases</a> ·
+  <a href="https://github.com/pgm1207/WallForge/issues">issues</a></p>
+
+  <footer>MIT licensed. Not affiliated with Wallpaper Engine or Valve. No Wallpaper Engine files are distributed
+  here; you need your own copy of the game for scene wallpapers.</footer>
+</main>
+</body>
+</html>
