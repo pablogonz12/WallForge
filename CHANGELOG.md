@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 (2026-11-20)
 
 ### New
 
@@ -11,6 +11,9 @@
 - Monitors are discovered through Mutter on GNOME, so the connector names match.
 - KDE Plasma is documented as supported (tested on KWin 6.8). Correction: KWin has implemented `wlr-layer-shell`
   since Plasma 5.20, not 6.7 as 0.7.0's notes said.
+- **Add your own wallpapers**: the + button (or `wallforge --import FILE...`) imports video files, images, a web
+  wallpaper folder or a **Lively Wallpaper** `.zip` package into a local library next to your Workshop items. Videos
+  are linked, not copied (`--copy` copies). Lively zips are unpacked safely (no paths outside the folder, size cap).
 - **Discover sources**: a selector for Wallpaper Engine Workshop or **Wikimedia Commons** (free videos, public
   domain / CC0 / CC BY / CC BY-SA only, with licence and author on the card and detail page, and an attribution line
   saved in the project). `wallforge --commons` searches from the terminal.
@@ -21,6 +24,11 @@
 
 ### Fixed
 
+- Some scenes were drawn upside down (e.g. "Giratina's Entrance at Spear Pillar"): a layer that other objects
+  sample was drawn from its bottom-up render-target copy.
+- niri's blur/xray showed the preloaded next wallpaper instead of the visible one. The preloaded renderer now starts
+  `--hidden` (it loads and renders but presents nothing until it is switched to, still a ~28 ms switch), and the
+  wallpaper now sits on the `background` layer by default, which is the layer niri's blur samples.
 - Window mode now renders at the monitor's size instead of the 1920x1048 work area, so the wallpaper is no longer
   slightly stretched. Preloading is off in window mode.
 
