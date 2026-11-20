@@ -34,7 +34,7 @@ extern "C" {
 }
 
 /// One frame's worth of normalised (0..1) spectrum, shared with the renderer. Plain data, `Copy`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Snapshot {
     pub s16l: [f32; 16], pub s16r: [f32; 16], pub s16a: [f32; 16],
     pub s32l: [f32; 32], pub s32r: [f32; 32], pub s32a: [f32; 32],

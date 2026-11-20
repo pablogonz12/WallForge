@@ -168,7 +168,7 @@ pub fn run(args: Args) {
         }
         if engine.text_tick() { dirty = true; }
         let now = Instant::now();
-        if app.cb_ready && (dirty || (engine.animated && now >= next_due)) {
+        if app.cb_ready && (dirty || ((engine.animated || engine.audio_dirty) && now >= next_due)) {
             engine.tick();
             surface.frame(&qh, ());
             app.cb_ready = false;
@@ -183,7 +183,7 @@ pub fn run(args: Args) {
                            libc::pollfd { fd: sig_pipe[0], events: libc::POLLIN, revents: 0 }];
             let now = Instant::now();
             let mut deadline: Option<Instant> = None;
-            if engine.animated && app.cb_ready { deadline = Some(next_due); }
+            if (engine.animated || engine.audio_dirty) && app.cb_ready { deadline = Some(next_due); }
             if let Some(d) = engine.text_deadline() { deadline = Some(deadline.map_or(d, |x| x.min(d))); }
             if let Some(d) = args.duration {
                 let e = start + Duration::from_secs_f64(d);

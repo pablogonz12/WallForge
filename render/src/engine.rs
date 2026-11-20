@@ -111,7 +111,7 @@ struct Layer {
 pub struct Engine {
     layers: Vec<Layer>, prog: u32, u_mvp: i32, u_size: i32, u_tint: i32, u_pm: i32, u_flip: i32, u_uvs: i32, u_uvo: i32,
     vao: u32, view: Mat4, pub clear: [f32; 3], scene_wh: (f32, f32),
-    pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32,
+    pub animated: bool, pub audio_dirty: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32,
     out: (i32, i32), screen: (i32, i32), main_rt: Option<Target>, scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
     t0: std::time::Instant, time_override: Option<f32>, videos: Vec<crate::video::VideoTex>, texts: Vec<crate::text::Live>, parts: crate::particles::Set,
     prov: HashMap<i64, usize>,          // scene object id -> layer index (render target producers)
@@ -179,7 +179,7 @@ impl Engine {
             gl::Disable(gl::DEPTH_TEST); gl::Disable(gl::DITHER); gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
         }
         let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_pm: loc(prog, "pm"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
-            vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
+            vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, audio_dirty: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
             out, screen: out, main_rt: None, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], texts: vec![], parts: Default::default(), prov: HashMap::new(), frame_state: vec![], frame_tex: vec![],
             audio: None, audio_tried: false, spec: crate::audiocap::Snapshot::ZERO };
         e.rebuild();
@@ -516,7 +516,11 @@ impl Engine {
     pub fn tick(&mut self) {
         let fixed = self.time_override.map(|t| t as f64);
         for v in &mut self.videos { v.update(fixed); }
-        if let Some(a) = &self.audio { self.spec = a.snapshot(); }
+        if let Some(a) = &self.audio {
+            let s = a.snapshot();
+            self.audio_dirty = s != self.spec;  // visualisers only redraw when the spectrum moved
+            self.spec = s;
+        }
     }
 
     fn set_uniform(&self, u: &Uniform, l: i32, p: &Pass, mvp: &Mat4, t: f32, tex_res: &[(f32, f32)]) {
