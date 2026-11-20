@@ -28,6 +28,7 @@ use wayland_client::protocol::{wl_callback, wl_compositor, wl_output, wl_region,
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols::wp::fractional_scale::v1::client::{wp_fractional_scale_manager_v1, wp_fractional_scale_v1};
 use wayland_protocols::wp::viewporter::client::{wp_viewport, wp_viewporter};
+use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 static STOP: AtomicBool = AtomicBool::new(false);
@@ -61,6 +62,7 @@ struct Args {
     scaling: Scaling,
     fps: f64,
     layer: zwlr_layer_shell_v1::Layer,
+    window: bool,
     duration: Option<f64>,
     force_sw: bool,
     volume: u32,
@@ -78,13 +80,13 @@ struct Args {
 
 fn usage() -> ! {
     eprintln!("usage: wallforge-render --output NAME --bg <dir|video> [--scaling fill|fit|stretch] [--fps N] \
-               [--scale 25..100] [--layer background|bottom|top|overlay] [--silent] [--no-audio-processing] [--volume N] [--duration SECS] [--software] [--disable-particles] [--assets-dir DIR] [--set-property key=value]...\n       wallforge-render --check <dir|video>   (probe, print one JSON line, no window)");
+               [--scale 25..100] [--layer background|bottom|top|overlay] [--window] [--silent] [--no-audio-processing] [--volume N] [--duration SECS] [--software] [--disable-particles] [--assets-dir DIR] [--set-property key=value]...\n       wallforge-render --check <dir|video>   (probe, print one JSON line, no window)");
     std::process::exit(2)
 }
 
 fn parse_args() -> Args {
     let mut a = Args { output: String::new(), bg: PathBuf::new(), scaling: Scaling::Fill, fps: 30.0,
-        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false, check: false, assets_dir: None, props: vec![], make_test: None, screenshot: None, ready_file: None, shot_size: (1920, 1080), shot_time: 0.0, scale: 100 };
+        layer: zwlr_layer_shell_v1::Layer::Background, window: false, duration: None, force_sw: false, volume: 100, silent: false, check: false, assets_dir: None, props: vec![], make_test: None, screenshot: None, ready_file: None, shot_size: (1920, 1080), shot_time: 0.0, scale: 100 };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| usage());
@@ -104,6 +106,7 @@ fn parse_args() -> Args {
             "--software" => a.force_sw = true,
             "--disable-particles" => particles::DISABLED.store(true, Ordering::Relaxed),
             "--assets-dir" => a.assets_dir = Some(PathBuf::from(val())),
+            "--window" => a.window = true,
             "--ready-file" => a.ready_file = Some(val()),
             "--set-property" => { let v = val(); match v.split_once('=') { Some((k, x)) => a.props.push((k.to_string(), x.to_string())), None => usage() } }
             "--screenshot" => a.screenshot = Some(PathBuf::from(val())),
@@ -131,13 +134,15 @@ fn resolve_video(bg: &PathBuf) -> Result<String, String> {
 }
 
 struct App {
-    outputs: Vec<(wl_output::WlOutput, Option<String>, i32)>,
+    outputs: Vec<(wl_output::WlOutput, Option<String>, i32, (i32, i32))>,
     configured: bool,
     closed: bool,
     size: (i32, i32),
     resized: bool,
     cb_ready: bool,
     ready_file: Option<String>,
+    fb: (i32, i32), // --window: logical size of the target output, used when the toplevel configure says 0x0
+    pend: (i32, i32), // --window: size from the last xdg_toplevel configure
     frac: u32, // preferred fractional scale in 1/120 (0 = unknown)
 }
 
@@ -170,6 +175,77 @@ impl Dispatch<wl_surface::WlSurface, ()> for App {
 impl Dispatch<zwlr_layer_shell_v1::ZwlrLayerShellV1, ()> for App {
     fn event(_: &mut Self, _: &zwlr_layer_shell_v1::ZwlrLayerShellV1, _: zwlr_layer_shell_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
 }
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for App {
+    fn event(_: &mut Self, b: &xdg_wm_base::XdgWmBase, e: xdg_wm_base::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_wm_base::Event::Ping { serial } = e { b.pong(serial); }
+    }
+}
+impl Dispatch<xdg_surface::XdgSurface, ()> for App {
+    fn event(s: &mut Self, x: &xdg_surface::XdgSurface, e: xdg_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_surface::Event::Configure { serial } = e {
+            x.ack_configure(serial);
+            let sz = if s.pend.0 > 0 && s.pend.1 > 0 { s.pend } else { s.fb };
+            if sz != s.size { s.size = sz; s.resized = true; }
+            s.configured = true;
+        }
+    }
+}
+impl Dispatch<xdg_toplevel::XdgToplevel, ()> for App {
+    fn event(s: &mut Self, _: &xdg_toplevel::XdgToplevel, e: xdg_toplevel::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match e {
+            xdg_toplevel::Event::Configure { width, height, .. } => s.pend = (width, height),
+            xdg_toplevel::Event::Close => s.closed = true,
+            _ => {}
+        }
+    }
+}
+
+/// Where the wallpaper surface lives: a wlr layer surface, or with `--window` a plain xdg toplevel titled
+/// `@wallforge!<output>` that a compositor-side helper (GNOME Shell extension) pins behind all windows.
+pub enum Shell { Layer(zwlr_layer_shell_v1::ZwlrLayerShellV1), Window(xdg_wm_base::XdgWmBase) }
+pub enum Role { Layer(zwlr_layer_surface_v1::ZwlrLayerSurfaceV1), Window(xdg_toplevel::XdgToplevel, xdg_surface::XdgSurface) }
+pub fn bind_shell(globals: &wayland_client::globals::GlobalList, qh: &QueueHandle<App>, window: bool) -> Shell {
+    if window {
+        return Shell::Window(globals.bind(qh, 1..=6, ()).unwrap_or_else(|_| { eprintln!("wallforge-render: this compositor does not implement xdg-shell"); std::process::exit(2) }));
+    }
+    // Layer-shell is how a wallpaper gets attached behind every window. GNOME Shell does not implement it,
+    // so say what is wrong and what to do instead of dying with a protocol bind error.
+    match globals.bind(qh, 1..=4, ()) {
+        Ok(s) => Shell::Layer(s),
+        Err(_) => {
+            eprintln!("wallforge-render: this compositor does not implement wlr-layer-shell, so a wallpaper cannot be \
+                       placed behind your windows.");
+            eprintln!("  Supported: niri, Hyprland, Sway, river, Wayfire, labwc, KDE Plasma 6.7+.");
+            eprintln!("  GNOME Shell does not implement it: run with --window plus the WallForge GNOME Shell extension, which pins the window behind all others.");
+            std::process::exit(2);
+        }
+    }
+}
+impl Shell {
+    pub fn attach(&self, qh: &QueueHandle<App>, surface: &wl_surface::WlSurface, out: &wl_output::WlOutput, args: &Args) -> Role {
+        match self {
+            Shell::Layer(shell) => {
+                let layer = shell.get_layer_surface(surface, Some(out), args.layer, "wallforge".into(), qh, ());
+                layer.set_anchor(zwlr_layer_surface_v1::Anchor::Top | zwlr_layer_surface_v1::Anchor::Bottom | zwlr_layer_surface_v1::Anchor::Left | zwlr_layer_surface_v1::Anchor::Right);
+                layer.set_exclusive_zone(-1);
+                layer.set_size(0, 0);
+                layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
+                Role::Layer(layer)
+            }
+            Shell::Window(wm) => {
+                let xs = wm.get_xdg_surface(surface, qh, ());
+                let top = xs.get_toplevel(qh, ());
+                top.set_title(format!("@wallforge!{}", args.output));
+                top.set_app_id("dev.wallforge.Renderer".into());
+                Role::Window(top, xs)
+            }
+        }
+    }
+}
+impl Role {
+    pub fn destroy(&self) { match self { Role::Layer(l) => l.destroy(), Role::Window(t, x) => { t.destroy(); x.destroy(); } } }
+}
+
 impl Dispatch<wl_callback::WlCallback, ()> for App {
     fn event(s: &mut Self, _: &wl_callback::WlCallback, e: wl_callback::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
         if let wl_callback::Event::Done { .. } = e { s.cb_ready = true; }
@@ -181,6 +257,7 @@ impl Dispatch<wl_output::WlOutput, ()> for App {
         match e {
             wl_output::Event::Name { name } => ent.1 = Some(name),
             wl_output::Event::Scale { factor } => ent.2 = factor,
+            wl_output::Event::Mode { flags, width, height, .. } => if flags.into_result().map_or(false, |f| f.contains(wl_output::Mode::Current)) { ent.3 = (width, height) },
             _ => {}
         }
     }
@@ -258,42 +335,28 @@ fn main() {
     let conn = Connection::connect_to_env().unwrap_or_else(|e| { eprintln!("wayland connect: {e}"); std::process::exit(1) });
     let (globals, mut queue) = registry_queue_init::<App>(&conn).expect("registry");
     let qh = queue.handle();
-    let mut app = App { outputs: vec![], configured: false, closed: false, size: (0, 0), resized: false, cb_ready: true, ready_file: args.ready_file.clone(), frac: 0 };
+    let mut app = App { outputs: vec![], configured: false, closed: false, size: (0, 0), resized: false, cb_ready: true, ready_file: args.ready_file.clone(), fb: (0, 0), pend: (0, 0), frac: 0 };
     let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=6, ()).expect("wl_compositor");
-    // Layer-shell is how a wallpaper gets attached behind every window. GNOME Shell does not implement it,
-    // so say what is wrong and what to do instead of dying with a protocol bind error.
-    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = match globals.bind(&qh, 1..=4, ()) {
-        Ok(s) => s,
-        Err(_) => {
-            eprintln!("wallforge-render: this compositor does not implement wlr-layer-shell, so a wallpaper cannot be \
-                       placed behind your windows.");
-            eprintln!("  Supported: niri, Hyprland, Sway, river, Wayfire, labwc, KDE Plasma 6.7+.");
-            eprintln!("  GNOME Shell does not implement it and cannot be supported this way (tracked in the WallForge repo).");
-            std::process::exit(2);
-        }
-    };
+    let shell = bind_shell(&globals, &qh, args.window);
     let outs: Vec<(u32, u32)> = globals.contents().with_list(|l| l.iter().filter(|g| g.interface == "wl_output").map(|g| (g.name, g.version)).collect());
     for (name, ver) in outs {
         let o = globals.registry().bind::<wl_output::WlOutput, _, _>(name, ver.min(4), &qh, ());
-        app.outputs.push((o, None, 1));
+        app.outputs.push((o, None, 1, (0, 0)));
     }
     queue.roundtrip(&mut app).unwrap();
     queue.roundtrip(&mut app).unwrap();
-    let Some((out, _, scale)) = app.outputs.iter().find(|o| o.1.as_deref() == Some(args.output.as_str())).cloned() else {
+    let Some((out, _, scale, mode)) = app.outputs.iter().find(|o| o.1.as_deref() == Some(args.output.as_str())).cloned() else {
         let names: Vec<_> = app.outputs.iter().filter_map(|o| o.1.clone()).collect();
         eprintln!("wallforge-render: output {} not found (have: {})", args.output, names.join(", "));
         std::process::exit(1)
     };
 
+    app.fb = (mode.0 / scale.max(1), mode.1 / scale.max(1));
     let surface = compositor.create_surface(&qh, ());
     let empty = compositor.create_region(&qh, ());
     surface.set_input_region(Some(&empty));
     empty.destroy();
-    let layer = shell.get_layer_surface(&surface, Some(&out), args.layer, "wallforge".into(), &qh, ());
-    layer.set_anchor(zwlr_layer_surface_v1::Anchor::Top | zwlr_layer_surface_v1::Anchor::Bottom | zwlr_layer_surface_v1::Anchor::Left | zwlr_layer_surface_v1::Anchor::Right);
-    layer.set_exclusive_zone(-1);
-    layer.set_size(0, 0);
-    layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
+    let layer = shell.attach(&qh, &surface, &out, &args);
     let vpr: Option<wp_viewporter::WpViewporter> = globals.bind(&qh, 1..=1, ()).ok();
     let fsm: Option<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
     let viewport = vpr.as_ref().map(|v| v.get_viewport(&surface, &qh, ()));
