@@ -71,6 +71,7 @@ jobs:
           cd /tmp/pages/arch/x86_64
           # keep a short history of packages; the database only needs the newest of each
           ls -1t wallforge-*.pkg.tar.zst | tail -n +4 | xargs -r rm -f
+          rm -f *.old  # repo-add keeps a backup of the previous database
           repo-add --nocolor --remove --verify wallforge.db.tar.zst wallforge-*.pkg.tar.zst 2>/dev/null ||
             repo-add --nocolor --remove wallforge.db.tar.zst wallforge-*.pkg.tar.zst
           cd /tmp/pages
