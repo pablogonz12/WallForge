@@ -578,7 +578,9 @@ class Window(Adw.ApplicationWindow):
         if not pool:
             self.toasts.add_toast(Adw.Toast(title="No wallpapers to pick from"))
             return
-        self.sel = random.choice(pool)
+        showing = {v.get("id") for v in self.cfg.data["outputs"].values() if v.get("id")}
+        fresh = [i for i in pool if i.id not in showing] or pool  # avoid a no-op "random" pick
+        self.sel = random.choice(fresh)
         mons = self._mons or monitors.outputs()
         self.select(self.sel)
         self.apply([o["name"] for o in mons])
