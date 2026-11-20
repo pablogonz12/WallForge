@@ -24,6 +24,9 @@
 - **Text layers**: effect chains (glow, outline, shadow) now run on text, point sizes match the wallpapers' previews, date/time `format` patterns are expanded (strftime,
   `{year}`-style and Cafe-style `dd MMM yyyy`), and a custom font that cannot be found is named in the log instead of
   silently falling back.
+- Effect chains that use copy passes (a pass with no material), `#require` module directives, engine buffers such as
+  `_alias_lightCookie`, or JSON with trailing commas now load instead of being skipped. The fluid-simulation Gengar
+  wallpaper renders its full effect stack.
 - Effects can now sample **another layer's rendered image** (`_rt_imageLayerComposite_*`), including layers that are
   hidden in the scene. Shadow Keep's moon and the pixel-cyberpunk xray scene render their missing content instead of
   a blurry or black area.

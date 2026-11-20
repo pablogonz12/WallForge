@@ -91,6 +91,7 @@ impl Layer {
 const BLACK_MASK: &str = "\u{1}black-mask";
 
 struct Pass {
+    copy: bool, // material-less pass: blit "previous" into the target, as Wallpaper Engine does
     prog: u32,
     uniforms: Vec<(Uniform, i32)>,
     values: HashMap<String, Vec<f32>>, // material key -> value
@@ -368,6 +369,11 @@ impl Engine {
 
     fn build_pass(&mut self, ename: &str, ep: &scene::EffectPass, ov: Option<&(Map<String, Value>, Vec<Option<String>>, Map<String, Value>)>,
                   cache: &mut HashMap<String, Option<GlTex>>, s3tc: bool, want: (u32, u32)) -> Result<Pass, String> {
+        if ep.material.is_empty() {
+            // Wallpaper Engine allows a pass without a material: it copies the previous buffer into the target.
+            return Ok(Pass { copy: true, prog: 0, uniforms: vec![], values: HashMap::new(), uvr: vec![], textures: vec![],
+                             binds: vec![(0, "previous".to_string())], target: ep.target.clone(), time: false });
+        }
         let mat = scene::load_material(&self.vfs, &ep.material).ok_or_else(|| format!("material {} not found", ep.material))?;
         let mut combos = mat.combos.clone();
         if let Some((_, _, c)) = ov { for (k, v) in c { combos.insert(k.clone(), v.clone()); } }
@@ -389,7 +395,7 @@ impl Engine {
             for i in &masked { names.entry(*i).or_insert(true); }
             for (i, b) in names { if b { present.push(i); } }
         }
-        let black = if masked.is_empty() { 0 } else { self.black_tex() };
+        let black = self.black_tex();  // 1x1 black: for mask gates and for engine targets we do not render
         let key = format!("{}|{}|{:?}", mat.shader, Value::Object(combos.clone()), present);
         if !self.shader_cache.contains_key(&key) {
             let vfs = &self.vfs;
@@ -451,7 +457,7 @@ impl Engine {
                     if rt_layer_id(n).is_none() { return Err(format!("samples render target ({n}) in slot {i}, which is not supported")); }
                     binds.retain(|x| x.0 != i); binds.push((i, n.clone())); textures.push(None); uvr.push([1.0, 1.0]);
                 }
-                Some(n) if !n.starts_with("_rt_") => {
+                Some(n) if !n.starts_with("_rt_") && !n.contains("_alias_") => {
                     let path = scene::tex_file(n);
                     if !cache.contains_key(&path) {
                         let r = self.vfs.read(&path).and_then(|b| tex::parse(&b, false).ok()).and_then(|t| tex::upload(&t, want.0, want.1, &TexMeta::default(), s3tc).ok());
@@ -459,10 +465,13 @@ impl Engine {
                     }
                     match cache.get(&path).and_then(|x| x.as_ref()) { Some(g) => { textures.push(Some((g.id, (g.w, g.h)))); uvr.push(g.uv) }, None => return Err(format!("texture {path} not found")) }
                 }
+                // Engine-internal targets we do not render (shadow atlas aliases, ...): a cleared black texture keeps
+                // the pass compiling instead of dropping the whole effect chain.
+                Some(n) if n.starts_with("materials/_alias_") || n.starts_with("_rt_") => { textures.push(Some((black, (1, 1)))); uvr.push([1.0, 1.0]); }
                 _ => { textures.push(None); uvr.push([1.0, 1.0]) },
             }
         }
-        Ok(Pass { prog, uniforms, values, uvr, textures, binds, target: ep.target.clone(), time: tr.uses_time })
+        Ok(Pass { copy: false, prog, uniforms, values, uvr, textures, binds, target: ep.target.clone(), time: tr.uses_time })
     }
 
     /// Builds `o`'s effect chain into `layer` and allocates its ping-pong / named buffers.
@@ -494,6 +503,18 @@ impl Engine {
         };
         let (a, b) = (grab(0, w as i32, h as i32, &mut vram), grab(1, w as i32, h as i32, &mut vram));
         layer.ping = Some((a, b));
+        // Passes may sample buffers declared in the effect's `fbos` even when no pass writes them by name, so every
+        // declared buffer needs a target; otherwise the chain looks like it samples an unsupported buffer.
+        let declared: Vec<String> = layer.passes.iter().flat_map(|p| p.binds.iter().map(|(_, n)| n.clone())).filter(|n| fbo_div.contains_key(n)).collect();
+        for t in &declared {
+            if !layer.named.contains_key(t) {
+                let d = fbo_div.get(t).copied().unwrap_or(1.0);
+                let slot = 2 + layer.named.len();
+                let tg = grab(slot, ((w as f32 / d) as i32).max(1), ((h as f32 / d) as i32).max(1), &mut vram);
+                if std::env::var("WF_DBG").is_ok() { eprintln!("vram: fbo {t} {}x{}", tg.w, tg.h); }
+                layer.named.insert(t.clone(), tg);
+            }
+        }
         for p in &layer.passes {
             if let Some(t) = &p.target {
                 if !layer.named.contains_key(t) {
@@ -766,6 +787,16 @@ impl Engine {
         let dbg_n: usize = std::env::var("WF_PASSN").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX); let mut dbg_last: Option<(u32, i32, i32)> = None;
         for p in l.passes.iter().take(dbg_n) {
             let dst = match &p.target { Some(n) => l.named.get(n).copied().unwrap_or(cur.1), None => cur.1 };
+            if p.copy {
+                unsafe {
+                    gl::BindFramebuffer(gl::READ_FRAMEBUFFER, cur.0.fbo);
+                    gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, dst.fbo);
+                    gl::BlitFramebuffer(0, 0, cur.0.w, cur.0.h, 0, 0, dst.w, dst.h, gl::COLOR_BUFFER_BIT, gl::LINEAR);
+                    gl::BindFramebuffer(gl::FRAMEBUFFER, dst.fbo);
+                }
+                if p.target.is_none() { cur = (cur.1, cur.0); dbg_last = None; } else { dbg_last = Some((dst.tex, dst.w, dst.h)); }
+                continue;
+            }
             unsafe {
                 gl::BindFramebuffer(gl::FRAMEBUFFER, dst.fbo);
                 gl::Viewport(0, 0, dst.w, dst.h);

@@ -257,7 +257,7 @@ pub fn load_effect(vfs: &Vfs, file: &str) -> Option<EffectDef> {
     let mut passes = vec![];
     for p in j.get("passes")?.as_array()? {
         passes.push(EffectPass {
-            material: p.get("material")?.as_str()?.to_string(),
+            material: p.get("material").and_then(|v| v.as_str()).unwrap_or("").to_string(), // empty: copy pass
             bind: p.get("bind").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|b| Some((b.get("name")?.as_str()?.to_string(), b.get("index")?.as_u64()? as usize))).collect()).unwrap_or_default(),
             target: p.get("target").and_then(|v| v.as_str()).map(String::from),
             textures: p.get("textures").and_then(|v| v.as_array()).map(|a| a.iter().map(|t| t.as_str().map(String::from)).collect()).unwrap_or_default(),

@@ -107,6 +107,10 @@ fn expand(read: &dyn Fn(&str) -> Option<String>, src: &str, depth: u32, out: &mu
             let name = rest.trim().trim_matches(|c| c == '"' || c == '<' || c == '>');
             let inc = read(&format!("shaders/{name}")).ok_or_else(|| format!("missing include '{name}'"))?;
             expand(read, &inc, depth + 1, out)?;
+        } else if t.starts_with("#require") {
+            // Wallpaper Engine module includes (LightingV1, ImageProcessor, ...) come from its own shader library.
+            // We do not have those modules; drop the directive and let the compiler tell us if a symbol is missing.
+            out.push_str("// #require dropped\n");
         } else { out.push_str(line); out.push('\n'); }
     }
     Ok(())
