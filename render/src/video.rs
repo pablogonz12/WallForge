@@ -227,3 +227,162 @@ impl Decoder {
         Some(Frame { pts: p.pts, pos: p.pos, width: w, height: h, matrix, full_range, data })
     }
 }
+
+// ---------------- embedded (TEX) video textures: software decode to RGBA, looped ----------------
+
+struct SendBox<T>(T);
+unsafe impl<T> Send for SendBox<T> {}
+
+/// Sequential RGBA decoder over an in-memory mp4 (spilled to an unlinked temp file so ffmpeg can seek).
+struct RgbaDec {
+    input: ff::format::context::Input, dec: ff::decoder::Video, stream: usize, draining: bool, got: u32,
+    frame: ff::frame::Video, scaler: Option<ff::software::scaling::Context>, out: ff::frame::Video,
+    pub w: u32, pub h: u32, pub fps: f64, n: u64, rgba: Vec<u8>,
+}
+
+impl RgbaDec {
+    fn open(bytes: &[u8], want: (u32, u32)) -> Result<RgbaDec, String> {
+        ff::init().map_err(|e| e.to_string())?;
+        unsafe { sys::av_log_set_level(if std::env::var_os("WALLFORGE_FFMPEG_LOG").is_some() { sys::AV_LOG_WARNING as i32 } else { sys::AV_LOG_QUIET }) };
+        static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(|d| std::path::PathBuf::from(d).join("wallforge")).filter(|d| std::fs::create_dir_all(d).is_ok()).unwrap_or_else(std::env::temp_dir);
+        let path = dir.join(format!("embedded-{}-{}.mp4", std::process::id(), SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        std::fs::write(&path, bytes).map_err(|e| format!("video temp file: {e}"))?;
+        let input = ff::format::input(&path);
+        let _ = std::fs::remove_file(&path); // the open descriptor keeps the data alive
+        let input = input.map_err(|e| format!("embedded video: {e}"))?;
+        let st = input.streams().best(ff::media::Type::Video).ok_or("embedded video: no video stream")?;
+        let stream = st.index();
+        let fr: f64 = st.avg_frame_rate().into();
+        let fps = if fr.is_finite() && fr > 1.0 && fr < 240.0 { fr } else { 30.0 };
+        let mut ctx = ff::codec::context::Context::from_parameters(st.parameters()).map_err(|e| e.to_string())?;
+        unsafe { (*ctx.as_mut_ptr()).thread_count = 2; }
+        let dec = ctx.decoder().video().map_err(|e| format!("embedded video decoder: {e}"))?;
+        let (sw, sh) = (dec.width().max(1), dec.height().max(1));
+        // shrink by powers of two while still at least the on-screen size
+        let (mut w, mut h) = (sw, sh);
+        while w / 2 >= want.0.max(1) && h / 2 >= want.1.max(1) && w > 2 && h > 2 { w /= 2; h /= 2; }
+        let (w, h) = (w & !1, h & !1);
+        let (w, h) = (w.max(2), h.max(2));
+        Ok(RgbaDec { input, dec, stream, draining: false, got: 0, frame: ff::frame::Video::empty(), scaler: None, out: ff::frame::Video::new(ff::format::Pixel::RGBA, w, h), w, h, fps, n: 0, rgba: vec![0; (w * h * 4) as usize] })
+    }
+
+    /// Decode the next frame (looping at end of stream) into self.frame. Returns its index on the loop-free timeline.
+    fn decode(&mut self) -> bool {
+        let mut errs = 0;
+        loop {
+            match self.dec.receive_frame(&mut self.frame) {
+                Ok(()) => { self.got += 1; self.n += 1; return true; }
+                Err(ff::Error::Eof) => { if self.got == 0 { return false; } self.got = 0; self.draining = false; unsafe { sys::av_seek_frame(self.input.as_mut_ptr(), -1, 0, sys::AVSEEK_FLAG_BACKWARD as i32); } self.dec.flush(); }
+                Err(ff::Error::Other { errno }) if errno == libc::EAGAIN => {
+                    let mut pkt = ff::Packet::empty();
+                    match pkt.read(&mut self.input) {
+                        Ok(()) => { if pkt.stream() == self.stream { let _ = self.dec.send_packet(&pkt); } }
+                        Err(ff::Error::Eof) => { if !self.draining { let _ = self.dec.send_eof(); self.draining = true; } }
+                        Err(_) => { errs += 1; if errs > 50 { return false; } }
+                    }
+                }
+                Err(_) => { errs += 1; if errs > 50 { return false; } }
+            }
+        }
+    }
+
+    /// Convert self.frame to tightly packed RGBA in self.rgba.
+    fn convert(&mut self) {
+        if self.scaler.is_none() {
+            match ff::software::scaling::Context::get(self.frame.format(), self.frame.width(), self.frame.height(), ff::format::Pixel::RGBA, self.w, self.h, ff::software::scaling::Flags::BILINEAR) {
+                Ok(s) => self.scaler = Some(s), Err(_) => return,
+            }
+        }
+        if self.scaler.as_mut().unwrap().run(&self.frame, &mut self.out).is_err() { return; }
+        let (stride, row) = (self.out.stride(0), self.w as usize * 4);
+        let d = self.out.data(0);
+        for y in 0..self.h as usize { self.rgba[y * row..(y + 1) * row].copy_from_slice(&d[y * stride..y * stride + row]); }
+    }
+
+    /// Decode up to the frame due at media time t (seconds) and convert only that one.
+    fn seek_to(&mut self, t: f64) -> bool {
+        let target = (t.max(0.0) * self.fps) as u64 + 1;
+        let mut ok = false;
+        while self.n < target || !ok { if !self.decode() { return ok; } ok = true; }
+        self.convert();
+        true
+    }
+}
+
+struct Shared { latest: std::sync::Mutex<(Vec<u8>, u64)>, stop: std::sync::atomic::AtomicBool }
+
+/// A looping video that feeds one GL texture. Live: a decode thread paces itself at the video's frame rate and
+/// publishes the newest frame. Screenshot (fixed time): decodes synchronously to the requested time.
+pub struct VideoTex {
+    pub tex: u32, w: u32, h: u32, dec: Option<RgbaDec>, shared: std::sync::Arc<Shared>, thread: Option<std::thread::JoinHandle<()>>, seen: u64,
+}
+
+impl VideoTex {
+    /// Open and decode the first frame. Returns the output size too.
+    pub fn open(bytes: &[u8], want: (u32, u32), clamp: bool, nearest: bool) -> Result<VideoTex, String> {
+        let mut dec = RgbaDec::open(bytes, want)?;
+        if !dec.seek_to(0.0) { return Err("embedded video: no decodable frames".into()); }
+        let (w, h) = (dec.w, dec.h);
+        let mut tex = 0;
+        unsafe {
+            gl::GenTextures(1, &mut tex); gl::BindTexture(gl::TEXTURE_2D, tex);
+            let f = if nearest { gl::NEAREST } else { gl::LINEAR } as i32;
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, f); gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, f);
+            let c = if clamp { gl::CLAMP_TO_EDGE } else { gl::REPEAT } as i32;
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, c); gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, c);
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8 as i32, w as i32, h as i32, 0, gl::RGBA, gl::UNSIGNED_BYTE, dec.rgba.as_ptr() as *const _);
+        }
+        let mut v = VideoTex { tex, w, h, dec: None, shared: std::sync::Arc::new(Shared { latest: std::sync::Mutex::new((Vec::new(), 0)), stop: Default::default() }), thread: None, seen: 0 };
+        v.dec = Some(dec);
+        Ok(v)
+    }
+    pub fn size(&self) -> (u32, u32) { (self.w, self.h) }
+
+    fn upload(&self, px: &[u8]) {
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, self.tex);
+            gl::TexSubImage2D(gl::TEXTURE_2D, 0, 0, 0, self.w as i32, self.h as i32, gl::RGBA, gl::UNSIGNED_BYTE, px.as_ptr() as *const _);
+        }
+    }
+
+    /// Call from the render thread (GL context current) once per tick. `fixed` = media time for screenshots.
+    pub fn update(&mut self, fixed: Option<f64>) {
+        if let Some(t) = fixed {
+            if let Some(mut d) = self.dec.take() { if d.seek_to(t) { self.upload(&d.rgba); } self.dec = Some(d); }
+            return;
+        }
+        if self.thread.is_none() {
+            let Some(d) = self.dec.take() else { return };
+            let (sh, d0) = (self.shared.clone(), SendBox(d));
+            self.thread = Some(std::thread::spawn(move || {
+                let d0 = d0; let mut d = d0.0; // (whole-struct capture so the Send wrapper applies)
+                let start = std::time::Instant::now();
+                let base = d.n;
+                while !sh.stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    if !d.decode() { break; }
+                    let due = std::time::Duration::from_secs_f64((d.n - base) as f64 / d.fps);
+                    let now = start.elapsed();
+                    if now > due + std::time::Duration::from_secs_f64(1.5 / d.fps) { continue; } // behind: drop the frame unconverted
+                    d.convert();
+                    while !sh.stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        let e = start.elapsed();
+                        if e >= due { break; }
+                        std::thread::sleep((due - e).min(std::time::Duration::from_millis(20)));
+                    }
+                    let mut g = sh.latest.lock().unwrap();
+                    g.0.clear(); g.0.extend_from_slice(&d.rgba); g.1 += 1;
+                }
+            }));
+        }
+        let g = self.shared.latest.try_lock();
+        if let Ok(g) = g { if g.1 != self.seen { self.seen = g.1; self.upload(&g.0); } }
+    }
+}
+
+impl Drop for VideoTex {
+    fn drop(&mut self) {
+        self.shared.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(t) = self.thread.take() { let _ = t.join(); }
+    }
+}
