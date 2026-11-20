@@ -3,6 +3,7 @@ mod check;
 mod egl;
 mod engine;
 mod gfx;
+mod particles;
 mod pkg;
 mod scene;
 mod scene_run;
@@ -71,7 +72,7 @@ struct Args {
 
 fn usage() -> ! {
     eprintln!("usage: wallforge-render --output NAME --bg <dir|video> [--scaling fill|fit|stretch] [--fps N] \
-               [--layer background|bottom|top|overlay] [--silent] [--volume N] [--duration SECS] [--software] [--assets-dir DIR] [--set-property key=value]...\n       wallforge-render --check <dir|video>   (probe, print one JSON line, no window)");
+               [--layer background|bottom|top|overlay] [--silent] [--volume N] [--duration SECS] [--software] [--disable-particles] [--assets-dir DIR] [--set-property key=value]...\n       wallforge-render --check <dir|video>   (probe, print one JSON line, no window)");
     std::process::exit(2)
 }
 
@@ -93,6 +94,7 @@ fn parse_args() -> Args {
             "--volume" => a.volume = val().parse::<u32>().unwrap_or_else(|_| usage()).min(100),
             "--silent" => a.silent = true,
             "--software" => a.force_sw = true,
+            "--disable-particles" => particles::DISABLED.store(true, Ordering::Relaxed),
             "--assets-dir" => a.assets_dir = Some(PathBuf::from(val())),
             "--set-property" => { let v = val(); match v.split_once('=') { Some((k, x)) => a.props.push((k.to_string(), x.to_string())), None => usage() } }
             "--screenshot" => a.screenshot = Some(PathBuf::from(val())),
