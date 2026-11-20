@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.0
+
+### Performance and battery
+
+- **Render resolution** (Settings > Effects and power): scene wallpapers can be drawn at 25–100% of the screen size
+  and upscaled with one linear blit. Videos and web wallpapers are unaffected.
+- **Battery saving**: while discharging, the frame rate is capped at 30 fps and the render scale at 75% (on by
+  default); optionally pause every wallpaper on battery and resume when you plug in.
+- Web wallpapers follow the reduced frame rate too.
+
+### Stability
+
+- **Crash watchdog**: a renderer that dies unexpectedly is restarted. After three restarts in five minutes the screen
+  is left idle with a "stopped after repeated crashes" note in the playing bar, instead of a restart loop.
+
+### Documentation
+
+- README: "Performance and battery" section; renderer README documents `--scale`.
+- `.coderabbit.yaml` so pull requests are reviewed by CodeRabbit with project-specific hints.
+
 ## 0.5.0
 
 The app is now called **WallForge**. Commands, paths and the app id are unchanged.

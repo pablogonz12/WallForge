@@ -7,7 +7,7 @@ and **scene** wallpapers. WallForge starts one process per output; it can also b
 wallforge-render --output DP-2 --bg <wallpaper dir | video file> \
   [--scaling fill|fit|stretch] [--fps 30] [--layer background|bottom|top|overlay] \
   [--silent] [--volume N] [--duration SECS] [--software] \
-  [--assets-dir DIR] [--set-property key=value]... [--disable-particles]      (scenes)
+  [--assets-dir DIR] [--set-property key=value]... [--disable-particles] [--scale 100]      (scenes)
 wallforge-render --check <wallpaper dir | video file>                           (JSON report, no window)
 wallforge-render --bg DIR --screenshot out.png [--screenshot-size WxH] [--screenshot-time SECS]   (headless)
 ```
@@ -42,6 +42,8 @@ effects: the WE shader dialect is translated to GLSL ES 3.00 with ping-pong FBOs
 sleep; only effects using `g_Time` redraw every frame.
 
 Also supported:
+- Render scale (`--scale 25..100`): the scene is drawn into a smaller framebuffer and blitted to the surface with
+  linear filtering, so a weak GPU keeps the wallpapers it likes at a lower cost. Effects keep their own resolution.
 - Particle systems (`particles.rs`): box and sphere emitters, the common initializers and operators, sprite sheets,
   additive and translucent blending, one instanced draw per system, seeded and prewarmed so screenshots are
   repeatable. Trails and ropes are drawn as plain sprites. `--disable-particles` turns them off.

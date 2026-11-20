@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en
+reviews:
+  profile: chill
+  auto_review:
+    enabled: true
+    drafts: false
+  high_level_summary: true
+  poem: false
+  collapse_walkthrough: true
+  path_filters:
+    - "!render/target/**"
+    - "!**/target/**"
+    - "!**/__pycache__/**"
+    - "!.flatpak-builder/**"
+    - "!**/*.log"
+    - "!**/*.png"
+    - "!**/*.jpg"
+    - "!**/*.jpeg"
+    - "!**/*.webp"
+    - "!**/*.gif"
+    - "!**/*.ico"
+    - "!**/*.pkg"
+    - "!**/*.bin"
+  path_instructions:
+    - path: "render/src/**"
+      instructions: >-
+        This is the Rust OpenGL renderer for Wallpaper Engine scene and video wallpapers, built against the
+        compositor's layer surface. Review for: GL object and FBO leaks (every Target texture/framebuffer must be
+        deleted), per-frame heap allocations in the draw loop, changes that defeat the existing frame skipping for
+        static scenes, wrong units in shader uniforms and matrices, and anything that can panic in a long-running
+        process. Frame pacing matters: wallpapers run for days, so a leak or a stall per frame is a real bug.
+    - path: "wallforge/**"
+      instructions: >-
+        GTK 4 + libadwaita app in Python 3.11+. Follow existing patterns: settings rows through the `spin`/`switch`
+        helpers and `_set_e`, config keys through `Config`. Never block the GTK main thread; spawn threads and post
+        back with `GLib.idle_add`. Flag bare `except:` blocks that hide a real failure, subprocess calls without
+        timeouts, and anything that leaves a renderer process running after an error.
+    - path: "docs/**"
+      instructions: >-
+        Compatibility claims must match verified behaviour: "works" means it was rendered and compared against the
+        wallpaper's own preview, not just that the renderer exited cleanly. Flag overstated support.
+    - path: "render/tools/**"
+      instructions: >-
+        Developer scripts for batch rendering and preview comparison. Keep them usable on a machine with 100+ Workshop
+        wallpapers and avoid hard-coded user paths.
+  tools:
+    shellcheck:
+      enabled: true
+    ruff:
+      enabled: true
+chat:
+  auto_reply: true

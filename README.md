@@ -53,8 +53,10 @@ with layer-shell support (niri, Hyprland, Sway, ...).
 - **Auto scaling** by default; fill, fit and stretch are in Settings.
 - **Palette sync** with Noctalia, matugen, wallust, pywal or a custom command.
 - **Restore at login**: `wallforge.sh --restore` re-applies your saved wallpapers (toggle in Settings).
-- **Safe**: a crash shows a toast with a "View log" button, broken files are caught by a watchdog, and unsupported
-  3D scenes are detected before you apply them.
+- **Low cost by default**: one small renderer per screen, still scenes drawn once and then frozen, a render
+  resolution setting, and battery saving that lowers the frame rate (or pauses everything) when you unplug.
+- **Safe**: a crash shows a toast with a "View log" button, a dead renderer is restarted automatically, broken files
+  are caught by a watchdog, and unsupported 3D scenes are detected before you apply them.
 - **Sensible defaults**: anime and mature content are hidden until you switch them on in Settings.
 - Keyboard: `Ctrl+F` search, `Ctrl+R` random, `Ctrl+,` settings, `F5` rescan.
 
@@ -88,6 +90,26 @@ cd wallforge
 
 A `wallforge-git` PKGBUILD is in [`packaging/aur/`](packaging/aur). It is not published on the AUR yet; build it
 with `makepkg -si` from that folder.
+
+## Performance and battery
+
+WallForge renders each wallpaper in one small process per screen and keeps still scenes frozen: a scene whose effects do
+not depend on time is drawn once and then sleeps until something changes.
+
+Settings that trade a little sharpness for a lot less GPU time:
+
+- **Render resolution (%)**: scene wallpapers are drawn at 25–100% of the screen size and upscaled with linear
+  filtering. Videos and web wallpapers always play at native resolution. 100% is the default; 75% is a good
+  compromise on a laptop or a shared GPU, 50% makes a heavy scene comfortable on an integrated GPU.
+- **Frame rate limit**: 30 fps by default (5–240). 24 is enough for most wallpapers and nearly halves the work of 60.
+- **Disable particles**, **Disable parallax**, **Disable mouse interaction**: turn off the effects that cost the most
+  and that you are least likely to notice under your windows.
+- **Reduce frame rate and resolution on battery**: while discharging, the limit drops to 30 fps and the render scale to
+  75% at most, without touching your settings.
+- **Pause wallpapers on battery**: stops every wallpaper while discharging and brings them back when you plug in.
+
+If a wallpaper stops on its own, WallForge restarts it; after three failures in five minutes it leaves the screen idle
+and says so in the playing bar instead of looping on a crash. The log is under Settings > About > View log.
 
 ## Share a wallpaper
 
