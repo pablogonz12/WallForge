@@ -1,14 +1,16 @@
-"""Launch and stop the wallpaper renderer (native wallforge-render for videos, else linux-wallpaperengine), one process per output."""
+"""Launch and stop the wallpaper player, one process per output: wallforge-render for videos and scenes, the WebKit
+player for web wallpapers, linux-wallpaperengine as a fallback when it is installed."""
 from __future__ import annotations
 
 import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
-from . import library, paths, texpatch
+from . import library, paths, texpatch, webplayer
 
 STATE = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "wallforge"
 
@@ -22,6 +24,44 @@ def _fmt(spec: dict, val) -> str:
             return " ".join(str(v) for v in val)
         return str(val)
     return str(val)
+
+
+_web_missing: str | None = None
+
+
+def web_missing() -> str:
+    """Empty when web wallpapers can play, else the packages that are missing."""
+    global _web_missing
+    if _web_missing is None:
+        try:
+            _web_missing = webplayer.available()
+        except Exception as e:
+            _web_missing = str(e) or "PyGObject"
+    return _web_missing
+
+
+def use_web(item: library.Item) -> bool:
+    return item.kind == "web" and not item.broken and not web_missing()
+
+
+def build_web_args(cfg, item: library.Item, output: str, overrides: dict | None = None) -> list[str]:
+    """Command line of the WebKit player (wallforge/webplayer.py) for a web wallpaper."""
+    e = cfg.data["engine"]
+    props = item.properties()
+    vals = dict(item.defaults())
+    vals.update(cfg.values_for(item.id))
+    vals.update(overrides or {})
+    a = [sys.executable, "-m", "wallforge.webplayer", "--output", output, "--bg", str(item.run_dir),
+         "--fps", str(e["fps"]), "--layer", e.get("layer", "bottom")]
+    vol = cfg.volume_for(item.id)
+    a += ["--volume", str(vol)] if vol else ["--silent"]
+    if not e.get("disable_mouse", True):
+        a.append("--mouse")
+    for k, v in vals.items():
+        spec = props.get(k)
+        if isinstance(spec, dict) and v not in (None, ""):
+            a += ["--set-property", f"{k}={_fmt(spec, v)}"]
+    return a
 
 
 def use_native(cfg, item: library.Item) -> bool:
@@ -160,7 +200,7 @@ def find_pids(output: str) -> list[int]:
     for p in Path("/proc").glob("[0-9]*"):
         try:
             comm = (p / "comm").read_text()
-            if not comm.startswith(("linux-wallpaper", "wallforge-rend")):
+            if not comm.startswith(("linux-wallpaper", "wallforge-rend", "wallforge-web")):
                 continue
             args = (p / "cmdline").read_bytes().split(b"\0")
             for i, a in enumerate(args[:-1]):
@@ -195,10 +235,19 @@ def stop(output: str, wait: float = 3.0):
 def start(cfg, item: library.Item, output: str, overrides: dict | None = None, legacy: bool = False) -> int:
     stop(output)
     STATE.mkdir(parents=True, exist_ok=True)
-    native = use_native(cfg, item) and not legacy
-    _marker(output).write_text("native" if native else "legacy")
-    args = build_native_args(cfg, item, output, overrides) if native else build_args(cfg, item, output, overrides)
+    web = use_web(item) and not legacy
+    native = not web and use_native(cfg, item) and not legacy
+    _marker(output).write_text("web" if web else "native" if native else "legacy")
     log = open(STATE / f"{output}.log", "w")
+    if web:
+        args = build_web_args(cfg, item, output, overrides)
+        pkg_root = str(Path(__file__).resolve().parent.parent)
+        env = dict(os.environ)
+        env["PYTHONPATH"] = pkg_root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        p = subprocess.Popen(args, cwd=pkg_root, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        _pidfile(output).write_text(str(p.pid))
+        return p.pid
+    args = build_native_args(cfg, item, output, overrides) if native else build_args(cfg, item, output, overrides)
     eng_dir = Path(args[0]).parent
     p = subprocess.Popen(args, cwd=str(eng_dir), env=dict(os.environ) if native else _env(eng_dir), stdout=log, stderr=subprocess.STDOUT,
                          start_new_session=True)

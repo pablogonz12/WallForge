@@ -412,10 +412,12 @@ class Window(Adw.ApplicationWindow):
                 self.toasts.add_toast(Adw.Toast(title=f"Skipped {', '.join(skipped)}: ultrawide wallpaper on a 16:9 screen"))
                 if not outputs:
                     return
-        if not engine.use_native(self.cfg, it):
-            if it.kind == "web":
-                self.toasts.add_toast(Adw.Toast(title="Web wallpapers are not supported yet"))
+        if it.kind == "web":
+            if engine.web_missing():
+                self.toasts.add_toast(Adw.Toast(title=f"Web wallpapers need {engine.web_missing()}: install it with your package manager",
+                                                timeout=8))
                 return
+        elif not engine.use_native(self.cfg, it):
             if it.kind != "video" and not assets.have_assets(self.cfg.data["assets_dir"]):
                 self._check_setup()
                 self.toasts.add_toast(Adw.Toast(title="Scene wallpapers need Wallpaper Engine's assets (Settings > Setup)"))
@@ -552,7 +554,7 @@ class Window(Adw.ApplicationWindow):
         d.present(self)
 
     def random_wallpaper(self):
-        pool = [i for i in self.items if not i.broken and not self._hidden_reason(i) and i.kind != "web"]
+        pool = [i for i in self.items if not i.broken and not self._hidden_reason(i) and (i.kind != "web" or not engine.web_missing())]
         if not pool:
             self.toasts.add_toast(Adw.Toast(title="No wallpapers to pick from"))
             return
