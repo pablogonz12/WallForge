@@ -155,8 +155,11 @@ def _per_wallpaper(user: dict):
 
 
 def read(path: Path) -> dict:
-    with open(path, encoding="utf-8-sig") as fh:
-        root = json.load(fh)
+    try:
+        with open(path, encoding="utf-8-sig") as fh:
+            root = json.load(fh)
+    except json.JSONDecodeError:
+        raise ValueError("That file is not valid JSON, so it is not a Wallpaper Engine config.json") from None
     if not isinstance(root, dict) or not _users(root):
         raise ValueError("This is not a Wallpaper Engine config.json")
     return root
