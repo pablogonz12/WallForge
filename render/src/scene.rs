@@ -114,9 +114,12 @@ fn v3(v: Option<Vec<f32>>, d: [f32; 3]) -> [f32; 3] {
 
 // ---------------- scene ----------------
 
+#[derive(Clone)]
 pub struct PassOv { pub constants: Map<String, Value>, pub textures: Vec<Option<String>>, pub combos: Map<String, Value> }
+#[derive(Clone)]
 pub struct EffectRef { pub file: String, pub name: String, pub passes: Vec<PassOv> }
 
+#[derive(Clone)]
 pub enum Kind { Image { model: String }, Particle { file: String, ov: Vec<(String, Vec<f32>)> }, Sound { files: Vec<String> }, Light, Group, Other(String), Text(Box<crate::text::TextDef>) }
 
 /// WE `alignment`: which point of the layer the origin refers to; returns the quad centre offset in layer sizes.
@@ -125,6 +128,7 @@ pub fn align_of(a: &str) -> [f32; 2] {
     [if a.contains("left") { 0.5 } else if a.contains("right") { -0.5 } else { 0.0 }, if a.contains("top") { -0.5 } else if a.contains("bottom") { 0.5 } else { 0.0 }]
 }
 
+#[derive(Clone)]
 pub struct Obj {
     pub id: i64, pub name: String, pub kind: Kind,
     pub origin: [f32; 3], pub scale: [f32; 3], pub angles: [f32; 3],
@@ -136,6 +140,9 @@ pub struct Obj {
 pub struct Scene {
     pub width: f32, pub height: f32, pub clear: [f32; 3],
     pub objects: Vec<Obj>,
+    /// Layers hidden with `visible: false`. Not composited, but their render targets can be sampled by other
+    /// layers (`_rt_imageLayerComposite_<id>_a`), so the renderer still builds them on demand.
+    pub hidden: Vec<Obj>,
     pub fatal: Vec<String>,    // reasons the scene cannot be rendered at all (3D)
     pub warnings: Vec<String>, // features ignored in stage 1
 }
@@ -151,18 +158,19 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
     };
     let clear = v3(props.floats(g.get("clearcolor")), [0.0, 0.0, 0.0]);
     let mut objects = vec![];
+    let mut hidden_objs = vec![];
     let hidden = hidden_ids(j.get("objects").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]), &props);
     for o in j.get("objects").and_then(|v| v.as_array()).ok_or("scene.json: no objects")? {
         let name = o.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let id = o.get("id").and_then(|v| v.as_i64()).unwrap_or(-1);
-        if hidden.contains(&id) { continue; }
+        let is_hidden = hidden.contains(&id);
         let kind = if let Some(i) = o.get("image").and_then(|v| v.as_str()) { Kind::Image { model: i.to_string() }
             } else if let Some(p) = o.get("particle").and_then(|v| v.as_str()) { Kind::Particle { file: p.to_string(), ov: o.get("instanceoverride").and_then(|v| v.as_object()).map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), props.floats(Some(v))?))).collect()).unwrap_or_default() }
             } else if let Some(s) = o.get("sound").and_then(|v| v.as_array()) { Kind::Sound { files: s.iter().filter_map(|x| x.as_str().map(String::from)).collect() }
             } else if o.get("text").is_some() && o.get("font").is_some() { match crate::text::parse(o, &|v| props.resolve(v)) { Some(t) => Kind::Text(Box::new(t)), None => Kind::Group }
             } else if o.get("light").is_some() { Kind::Light
             } else if let Some(m) = o.get("model").and_then(|v| v.as_str()) {
-                if m.ends_with(".mdl") || m.ends_with(".json") { fatal.push(format!("3D model object '{name}'")); }
+                if !is_hidden && (m.ends_with(".mdl") || m.ends_with(".json")) { fatal.push(format!("3D model object '{name}'")); }
                 Kind::Other(m.to_string())
             } else { Kind::Group };
         let mut effects = vec![];
@@ -182,8 +190,8 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
         }
         let size = props.floats(o.get("size")).filter(|s| s.len() >= 2).map(|s| [s[0], s[1]]);
         let ang = v3(props.floats(o.get("angles")), [0.0; 3]);
-        if ang[0] != 0.0 || ang[1] != 0.0 { warnings.push(format!("object '{name}': x/y rotation ignored")); }
-        objects.push(Obj {
+        if !is_hidden && (ang[0] != 0.0 || ang[1] != 0.0) { warnings.push(format!("object '{name}': x/y rotation ignored")); }
+        let obj = Obj {
             id, name, kind,
             origin: v3(props.floats(o.get("origin")), [0.0; 3]),
             scale: v3(props.floats(o.get("scale")), [1.0; 3]),
@@ -194,11 +202,12 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
             effects,
             blend: o.get("colorBlendMode").and_then(|v| v.as_i64().map(|n| n as i32).or_else(|| v.as_str().and_then(|s| s.parse().ok()))).and_then(|n| match n { 2 => Some("multiply"), 7 => Some("screen"), 9 | 31 => Some("additive"), _ => None }).map(String::from),
             align: align_of(o.get("alignment").and_then(|v| v.as_str()).unwrap_or("center")),
-        });
+        };
+        if is_hidden { hidden_objs.push(obj); } else { objects.push(obj); }
     }
     // auto projection (GIF-template scenes: width/height null): the scene is as large as its biggest sized layer
     if auto_size { if let Some(sz) = objects.iter().filter(|o| matches!(o.kind, Kind::Image { .. })).filter_map(|o| o.size.map(|s| [s[0] * o.scale[0].abs(), s[1] * o.scale[1].abs()])).max_by(|a, b| (a[0] * a[1]).total_cmp(&(b[0] * b[1]))) { if sz[0] > 0.0 && sz[1] > 0.0 { width = sz[0]; height = sz[1]; } } }
-    Ok(Scene { width, height, clear, objects, fatal, warnings })
+    Ok(Scene { width, height, clear, objects, hidden: hidden_objs, fatal, warnings })
 }
 
 // ---------------- model / material ----------------

@@ -157,10 +157,11 @@ pub fn apply_format(fmt: &str, t: &crate::clock::Tm) -> String {
 /// Rasterise `text` into a w x h RGBA8 buffer (white, alpha = coverage). `k` = texture pixels per scene unit.
 pub fn raster(font: &fontdue::Font, d: &TextDef, text: &str, w: u32, h: u32, k: f32) -> Vec<u8> {
     let mut a = vec![0u8; (w * h) as usize];
-    // `padding` insets the text box (scene units); it moves the alignment anchors and narrows the area
-    // text is aligned/wrapped in. Capped just below half the box so tiny text boxes cannot collapse.
-    let pad = (d.padding.max(0.0) * k).max(0.0);
-    let (pad_x, pad_y) = (pad.min(w as f32 * 0.45), pad.min(h as f32 * 0.45));
+    // Wallpaper Engine's `padding` is extra geometry around the glyphs (room for text effects), not an inset of
+    // the layer box: scenes store a constant 32 even for 14x23 text boxes, so honouring it as a margin would
+    // collapse those layers. Text effects are not applied yet, so it is ignored here.
+    let pad = 0.0f32;
+    let (pad_x, pad_y) = (pad, pad);
     let (avw, avh) = ((w as f32 - 2.0 * pad_x).max(1.0), (h as f32 - 2.0 * pad_y).max(1.0));
     // fonts with a tall line box (ascent+descent > 1 em) are drawn proportionally larger, matching the previews
     let line_em = font.horizontal_line_metrics(100.0).map_or(1.0, |m| (m.ascent - m.descent) / 100.0).clamp(1.0, 2.0);
@@ -287,15 +288,16 @@ mod tests {
         assert_eq!(apply_format("{unknown} {year}", &t()), "{unknown} 2023");
     }
     #[test]
-    fn padding_insets_alignment() {
+    fn padding_does_not_move_text() {
+        // Scenes store a constant padding (32) even for 14x23 boxes, so it is glyph geometry, not a box inset.
         let f = load_font(&|_| None, "").0.expect("a system font");
         let mk = |padding: f32| TextDef { value: "H".into(), script: None, sprops: Map::new(), font: String::new(), pointsize: 10.0, halign: "left".into(), valign: "top".into(), padding, format: None };
         let (w, h) = (200u32, 100u32);
         let col = |rgba: &[u8]| (0..w as usize).find(|x| (0..h as usize).any(|y| rgba[(y * w as usize + *x) * 4 + 3] > 0)).unwrap();
         let a = col(&raster(&f, &mk(0.0), "H", w, h, 1.0));
         let b = col(&raster(&f, &mk(40.0), "H", w, h, 1.0));
-        assert!(a <= 6, "no padding: glyph starts at the left edge, got {a}");
-        assert!(b >= 39, "padding should inset the glyph by ~40px, got {b}");
+        assert!(a <= 6, "the glyph starts at the left edge, got {a}");
+        assert_eq!(a, b, "padding must not shift or shrink the text");
     }
 }
 

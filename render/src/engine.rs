@@ -101,6 +101,11 @@ struct Pass {
 struct Layer {
     name: String, tex: u32, size: [f32; 2], world: Mat4, color: [f32; 3], alpha: f32, blend: Blend,
     uvs: [f32; 2], frames: Vec<tex::SpriteFrame>, tex_wh: (f32, f32), full: bool, passes: Vec<Pass>, ping: Option<(Target, Target)>, named: HashMap<String, Target>, px: (i32, i32),
+    id: i64,      // scene object id (used to resolve `_rt_imageLayerComposite_<id>_a`)
+    rt: Option<Target>, // sampled layers: their image in scene space, at the frame size
+    composite: bool, // fullscreen layer whose chain samples other layers: starts transparent, drawn blended
+    hidden: bool, // built only as a render-target producer: never composited into the frame
+    sampled: bool, // another layer samples this one: its buffers must not come from the shared pool
 }
 
 pub struct Engine {
@@ -109,6 +114,30 @@ pub struct Engine {
     pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32,
     out: (i32, i32), screen: (i32, i32), main_rt: Option<Target>, scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
     t0: std::time::Instant, time_override: Option<f32>, videos: Vec<crate::video::VideoTex>, texts: Vec<crate::text::Live>, parts: crate::particles::Set,
+    prov: HashMap<i64, usize>,          // scene object id -> layer index (render target producers)
+    frame_state: Vec<u8>,               // per frame: 0 not rendered, 1 in progress (cycle guard), 2 done
+    frame_tex: Vec<Option<(u32, i32, i32)>>,
+}
+
+/// `_rt_imageLayerComposite_<id>_a` -> Some(id): another layer's rendered output.
+fn rt_layer_id(name: &str) -> Option<i64> {
+    let rest = name.strip_prefix("_rt_imageLayerComposite_")?;
+    let d: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    d.parse().ok()
+}
+
+/// Render-target ids referenced by an object's effect chain (scene overrides, effect passes and their materials).
+fn rt_refs(vfs: &Vfs, o: &scene::Obj, out: &mut Vec<i64>) {
+    let mut add = |n: &str| { if let Some(id) = rt_layer_id(n) { out.push(id); } };
+    for e in &o.effects {
+        for p in &e.passes { for t in p.textures.iter().flatten() { add(t); } }
+        let Some(d) = scene::load_effect(vfs, &e.file) else { continue };
+        for p in &d.passes {
+            for t in p.textures.iter().flatten() { add(t); }
+            for (n, _) in &p.bind { add(n); }
+            if let Some(m) = scene::load_material(vfs, &p.material) { for t in m.textures.iter().flatten() { add(t); } }
+        }
+    }
 }
 
 pub fn view_matrix(sw: f32, sh: f32, ow: i32, oh: i32, scaling: Scaling) -> (Mat4, f32, f32) {
@@ -148,7 +177,7 @@ impl Engine {
         }
         let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_pm: loc(prog, "pm"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
             vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
-            out, screen: out, main_rt: None, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], texts: vec![], parts: Default::default() };
+            out, screen: out, main_rt: None, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], texts: vec![], parts: Default::default(), prov: HashMap::new(), frame_state: vec![], frame_tex: vec![] };
         e.rebuild();
         Ok(e)
     }
@@ -159,6 +188,17 @@ impl Engine {
 
     /// Size of the surface we present to (the layer surface); differs from `out` when rendering scaled.
     pub fn set_screen(&mut self, screen: (i32, i32)) { self.screen = (screen.0.max(1), screen.1.max(1)); }
+
+
+    /// World matrix of a hidden layer (parents may be hidden as well): producers are drawn at their real place.
+    fn world_hidden(&self, i: usize, depth: u32) -> Mat4 {
+        let o = &self.scene.hidden[i];
+        let local = scene::trs(o.origin, o.scale, o.angles[2]);
+        if depth > 16 { return local; }
+        let Some(p) = o.parent else { return local };
+        if let Some(pi) = self.scene.hidden.iter().position(|x| x.id == p) { if pi != i { return scene::mul(&self.world_hidden(pi, depth + 1), &local); } }
+        match self.scene.objects.iter().position(|x| x.id == p) { Some(pi) => scene::mul(&world_of(&self.scene.objects, pi, depth + 1), &local), None => local }
+    }
 
     fn white_tex(&mut self) -> u32 {
         if self.white == 0 { unsafe {
@@ -174,7 +214,19 @@ impl Engine {
 
     /// (Re)build all GPU resources for the current output size (texture mips / FBO sizes depend on it).
     fn rebuild(&mut self) {
+        // free the previous layers' buffers once each (the effect pool shares slots between layers)
+        {
+            let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+            for l in &self.layers {
+                let mut all: Vec<Target> = vec![];
+                if let Some((a, b)) = l.ping { all.push(a); all.push(b); }
+                if let Some(rt) = l.rt { all.push(rt); }
+                all.extend(l.named.values().copied());
+                for t in all { if t.fbo != 0 && seen.insert(t.fbo) { t.free(); } }
+            }
+        }
         self.videos.clear(); self.texts.clear(); self.layers.clear(); self.parts.clear(); self.vram = 0; self.animated = false; self.scene_rt = None;
+        self.prov.clear(); self.frame_state.clear(); self.frame_tex.clear();
         if let Some(rt) = self.main_rt.take() { rt.free(); }
         let (v, sx, sy) = view_matrix(self.scene_wh.0, self.scene_wh.1, self.out.0, self.out.1, self.scaling);
         self.view = v;
@@ -182,12 +234,38 @@ impl Engine {
         let mut cache: HashMap<String, Option<GlTex>> = HashMap::new();
         // Effect buffers are only live while one layer renders, so layers share them by (size, slot).
         let mut pool: HashMap<(i32, i32, usize), Target> = HashMap::new();
+        // Cross-layer render targets: hidden layers referenced by `_rt_imageLayerComposite_<id>_a` are built too
+        // (never composited), and any layer others sample gets exclusive buffers.
+        let mut referenced: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        let mut muted: Vec<usize> = vec![];
+        {
+            let mut queue: Vec<i64> = vec![];
+            let mut refs = vec![];
+            for o in &self.scene.objects { refs.clear(); rt_refs(&self.vfs, o, &mut refs); for id in &refs { referenced.insert(*id); queue.push(*id); } }
+            let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
+            while let Some(id) = queue.pop() {
+                if !seen.insert(id) { continue; }
+                let hit = self.scene.hidden.iter().position(|o| o.id == id).map(|j| (true, j))
+                    .or_else(|| self.scene.objects.iter().position(|o| o.id == id).map(|j| (false, j)));
+                let Some((hid, j)) = hit else { continue };
+                if hid && !muted.contains(&j) { muted.push(j); }
+                refs.clear();
+                rt_refs(&self.vfs, if hid { &self.scene.hidden[j] } else { &self.scene.objects[j] }, &mut refs);
+                for id in &refs { referenced.insert(*id); queue.push(*id); }
+            }
+            muted.sort();
+        }
         let n = self.scene.objects.len();
-        for i in 0..n {
-            if let Kind::Particle { file, ov } = &self.scene.objects[i].kind { let (w, at) = (world_of(&self.scene.objects, i, 0), self.layers.len()); self.parts.add(&self.vfs, file, ov, w, at, s3tc, i as u64); self.animated |= !self.parts.is_empty(); continue; }
-            if let Kind::Text(td) = &self.scene.objects[i].kind { let td = (**td).clone(); self.add_text(i, td, sx, sy); continue; }
+        let mut order: Vec<(bool, usize)> = muted.iter().map(|j| (true, *j)).collect();
+        order.extend((0..n).map(|i| (false, i)));
+        for (hid, i) in order {
+            let o = if hid { self.scene.hidden[i].clone() } else { self.scene.objects[i].clone() };
+            if let Kind::Particle { file, ov } = &o.kind {
+                let (w, at) = (if hid { scene::ident() } else { world_of(&self.scene.objects, i, 0) }, self.layers.len());
+                self.parts.add(&self.vfs, file, ov, w, at, s3tc, i as u64); self.animated |= !self.parts.is_empty(); continue;
+            }
+            if let Kind::Text(td) = &o.kind { if hid { continue; } let td = (**td).clone(); self.add_text(i, td, sx, sy); continue; }
             let (name, model, size_o, scale, color, alpha, blend_o) = {
-                let o = &self.scene.objects[i];
                 let Kind::Image { model } = &o.kind else { continue };
                 (o.name.clone(), model.clone(), o.size, o.scale, o.color, o.alpha, o.blend.clone())
             };
@@ -216,56 +294,75 @@ impl Engine {
             if frames.len() > 1 { self.animated = true; }
             self.vram += gt.bytes;
             if std::env::var("WF_DBG").is_ok() { eprintln!("vram: layer '{name}' tex {:.1} MiB ({}x{}) px {:?}", gt.bytes as f64 / 1048576.0, gt.w, gt.h, px); }
-            let world = world_of(&self.scene.objects, i, 0);
-            let world = { let al = self.scene.objects[i].align; if al == [0.0, 0.0] { world } else { scene::mul(&world, &scene::trs([al[0] * size[0], al[1] * size[1], 0.0], [1.0; 3], 0.0)) } };
+            let world = if hid { self.world_hidden(i, 0) } else {
+                let w = world_of(&self.scene.objects, i, 0);
+                if o.align == [0.0, 0.0] { w } else { scene::mul(&w, &scene::trs([o.align[0] * size[0], o.align[1] * size[1], 0.0], [1.0; 3], 0.0)) }
+            };
+            let sampled = referenced.contains(&o.id);
             let mut layer = Layer { name: name.clone(), tex: gt.id, size, world, color, alpha, uvs: gt.uv, frames, tex_wh, full, blend: blend_of(blend_o.as_deref().unwrap_or(&def.material.blending)),
-                passes: vec![], ping: None, named: HashMap::new(), px };
+                passes: vec![], ping: None, rt: None, named: HashMap::new(), px, id: o.id, hidden: hid, sampled, composite: false };
             if def.material.blending == "additive" { layer.blend = Blend::Additive; }
             // effects
-            let effects: Vec<_> = self.scene.objects[i].effects.iter().map(|e| (e.file.clone(), e.name.clone(), e.passes.iter().map(|p| (p.constants.clone(), p.textures.clone(), p.combos.clone())).collect::<Vec<_>>())).collect();
+            let effects: Vec<_> = o.effects.iter().map(|e| (e.file.clone(), e.name.clone(), e.passes.iter().map(|p| (p.constants.clone(), p.textures.clone(), p.combos.clone())).collect::<Vec<_>>())).collect();
             let mut fbo_div: HashMap<String, f32> = HashMap::new();
             let effects: Vec<_> = effects.into_iter().take(std::env::var("WF_MAXFX").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX)).collect();
             let only: Option<usize> = std::env::var("WF_ONLYFX").ok().and_then(|v| v.parse().ok()); let effects: Vec<_> = effects.into_iter().enumerate().filter(|(i, _)| only.map_or(true, |o| o == *i)).map(|x| x.1).collect();
-            let mut drop_all = false;
             for (file, ename, ovs) in effects {
                 let Some(ed) = scene::load_effect(&self.vfs, &file) else { self.note(format!("layer '{name}': effect {file} not found, skipped")); continue };
                 for f in &ed.fbos { fbo_div.insert(f.name.clone(), f.scale.max(1.0)); }
                 let mut built = vec![];
                 let mut ok = true;
                 for (pi, ep) in ed.passes.iter().enumerate() {
-                    match self.build_pass(&ename, ep, ovs.get(pi), &mut cache, s3tc, (px.0 as u32, px.1 as u32)) { Ok(p) => built.push(p), Err(e) => { if full && e.contains("render target") { drop_all = true; } self.note(format!("layer '{name}': effect {file} pass {pi}: {e}; effect skipped")); ok = false; break; } }
+                    match self.build_pass(&ename, ep, ovs.get(pi), &mut cache, s3tc, (px.0 as u32, px.1 as u32)) { Ok(p) => built.push(p), Err(e) => { self.note(format!("layer '{name}': effect {file} pass {pi}: {e}; effect skipped")); ok = false; break; } }
                 }
                 if ok { layer.passes.extend(built); }
             }
-            if drop_all { layer.passes.clear(); self.note(format!("layer '{name}': composition depends on other layers' render targets; all its effects skipped")); }
+            layer.composite = full && layer.passes.iter().any(|p| p.binds.iter().any(|(_, n)| n != "previous" && !layer.named.contains_key(n) && rt_layer_id(n).is_some()));
+            if sampled {
+                let rt = Target::new(self.out.0.max(1), self.out.1.max(1));
+                self.vram += rt.bytes(); layer.rt = Some(rt);
+            }
             if !layer.passes.is_empty() {
                 let (w, h) = (px.0.clamp(1, 4096), px.1.clamp(1, 4096));
-                let (w, h) = (w, h);
+                let mut vram = 0usize;
                 let mut grab = |slot: usize, tw: i32, th: i32, vram: &mut usize| -> Target {
-                    *pool.entry((tw, th, slot)).or_insert_with(|| { let t = Target::new(tw, th); *vram += t.bytes(); t })
+                    if sampled { let t = Target::new(tw, th); *vram += t.bytes(); t }
+                    else { *pool.entry((tw, th, slot)).or_insert_with(|| { let t = Target::new(tw, th); *vram += t.bytes(); t }) }
                 };
-                let (a, b) = (grab(0, w as i32, h as i32, &mut self.vram), grab(1, w as i32, h as i32, &mut self.vram));
+                let (a, b) = (grab(0, w as i32, h as i32, &mut vram), grab(1, w as i32, h as i32, &mut vram));
                 layer.ping = Some((a, b));
                 for p in &layer.passes {
                     if let Some(t) = &p.target {
                         if !layer.named.contains_key(t) {
                             let d = fbo_div.get(t).copied().unwrap_or(1.0);
                             let slot = 2 + layer.named.len();
-                            let tg = grab(slot, ((w as f32 / d) as i32).max(1), ((h as f32 / d) as i32).max(1), &mut self.vram);
+                            let tg = grab(slot, ((w as f32 / d) as i32).max(1), ((h as f32 / d) as i32).max(1), &mut vram);
                             if std::env::var("WF_DBG").is_ok() { eprintln!("vram: fbo {t} {}x{}", tg.w, tg.h); }
                             layer.named.insert(t.clone(), tg);
                         }
                     }
                     if p.time { self.animated = true; }
                 }
+                self.vram += vram;
             }
+            if hid || sampled { if std::env::var("WF_DBG").is_ok() { eprintln!("rt: layer {} '{name}' {}x{} hidden={hid} sampled={sampled} passes={}", o.id, px.0, px.1, layer.passes.len()); } }
+            let li = self.layers.len();
             self.layers.push(layer);
+            if matches!(o.kind, Kind::Image { .. }) { self.prov.insert(o.id, li); }
         }
         if self.layers.iter().any(|l| l.full) {
             let rt = Target::new(self.out.0.max(1), self.out.1.max(1));
             self.vram += rt.bytes(); self.scene_rt = Some(rt);
         }
         for (k, t) in cache { if let Some(t) = t { if std::env::var("WF_DBG").is_ok() { eprintln!("vram: cached {k} {:.1} MiB {}x{}", t.bytes as f64 / 1048576.0, t.w, t.h); } self.vram += t.bytes; } }
+        let mut missing: Vec<String> = vec![];
+        for l in &self.layers {
+            for p in &l.passes { for (_, n) in &p.binds {
+                if n == "previous" || l.named.contains_key(n) { continue; }
+                match rt_layer_id(n) { Some(id) if !self.prov.contains_key(&id) => missing.push(format!("layer '{}': effect samples render target {n} of a layer that is not rendered", l.name)), None => missing.push(format!("layer '{}': effect samples unsupported buffer {n}", l.name)), _ => {} }
+            } }
+        }
+        for m in missing { self.note(m); }
         eprintln!("wallforge-render: scene {}x{} -> {}x{}: {} layers, {} with effects, texture+fbo memory {:.1} MiB, animated={}",
             self.scene_wh.0, self.scene_wh.1, self.out.0, self.out.1, self.layers.len(), self.layers.iter().filter(|l| !l.passes.is_empty()).count(), self.vram as f64 / 1048576.0, self.animated);
     }
@@ -333,11 +430,15 @@ impl Engine {
         } }
         let mut textures = vec![]; let mut uvr: Vec<[f32; 2]> = vec![]; let mut binds = vec![(0usize, "previous".to_string())];
         if let Some(mx) = ep.bind.iter().map(|b| b.1 + 1).max() { if names.len() < mx { names.resize(mx, None); } }
-        if let Some((i, n)) = names.iter().enumerate().find(|(i, n)| n.as_deref().map_or(false, |n| n.starts_with("_rt_imageLayerComposite")) && !ep.bind.iter().any(|b| b.1 == *i)) { return Err(format!("samples another layer's render target ({}) in slot {i}, which is not supported", n.as_deref().unwrap_or(""))); }
         for (i, n) in names.iter().enumerate() {
             let bound = ep.bind.iter().find(|b| b.1 == i).map(|b| b.0.clone());
             if let Some(b) = bound { binds.retain(|x| x.0 != i); binds.push((i, b)); textures.push(None); uvr.push([1.0, 1.0]); continue; }
             match n {
+                Some(n) if n.starts_with("_rt_imageLayerComposite") => {
+                    // another layer's rendered output: bound by name at draw time (see Engine::ensure)
+                    if rt_layer_id(n).is_none() { return Err(format!("samples render target ({n}) in slot {i}, which is not supported")); }
+                    binds.retain(|x| x.0 != i); binds.push((i, n.clone())); textures.push(None); uvr.push([1.0, 1.0]);
+                }
                 Some(n) if !n.starts_with("_rt_") => {
                     let path = scene::tex_file(n);
                     if !cache.contains_key(&path) {
@@ -357,14 +458,14 @@ impl Engine {
     fn add_text(&mut self, i: usize, td: crate::text::TextDef, sx: f32, sy: f32) {
         let o = &self.scene.objects[i];
         let Some(size) = o.size else { return };
-        let (name, scale, color, alpha, align) = (o.name.clone(), o.scale, o.color, o.alpha.clamp(0.0, 1.0), o.align);
+        let (name, scale, color, alpha, align, obj_id) = (o.name.clone(), o.scale, o.color, o.alpha.clamp(0.0, 1.0), o.align, o.id);
         let px = ((size[0] * scale[0].abs() * sx).ceil().max(1.0) as i32, (size[1] * scale[1].abs() * sy).ceil().max(1.0) as i32);
         let world = world_of(&self.scene.objects, i, 0);
         let world = if align == [0.0, 0.0] { world } else { scene::mul(&world, &scene::trs([align[0] * size[0], align[1] * size[1], 0.0], [1.0; 3], 0.0)) };
         let vfs = &self.vfs;
         let (live, missing) = crate::text::Live::new(td, &|p| vfs.read(p), px.0.clamp(1, 4096) as u32, px.1.clamp(1, 4096) as u32, (sx * scale[0].abs()).max(1e-3), self.layers.len());
         if let Some(f) = missing { if !self.notes.iter().any(|n| n.contains(&f)) { self.note(format!("text '{name}': font '{f}' not found, using a fallback font")); } }
-        let layer = Layer { name, tex: live.tex, size, world, color, alpha, uvs: [1.0, 1.0], frames: vec![], tex_wh: (1.0, 1.0), full: false, blend: Blend::Alpha, passes: vec![], ping: None, named: HashMap::new(), px };
+        let layer = Layer { name, tex: live.tex, size, world, color, alpha, uvs: [1.0, 1.0], frames: vec![], tex_wh: (1.0, 1.0), full: false, blend: Blend::Alpha, passes: vec![], ping: None, rt: None, named: HashMap::new(), px, id: obj_id, hidden: false, sampled: false, composite: false };
         self.texts.push(live); self.layers.push(layer);
     }
     /// Refreshes time-driven text (checked at most once a second); true when something changed and a redraw is needed.
@@ -440,11 +541,17 @@ impl Engine {
             gl::BindVertexArray(self.vao);
         }
         self.parts.step(t);
-        for li in 0..self.layers.len() {
+        let nlayers = self.layers.len();
+        self.frame_state.clear(); self.frame_state.resize(nlayers, 0);
+        self.frame_tex.clear(); self.frame_tex.resize(nlayers, None);
+        for li in 0..nlayers {
+            // a layer's effect chain leaves its own FBO/viewport bound; particles need the frame target again
+            if self.parts.is_empty() == false { unsafe { gl::BindFramebuffer(gl::FRAMEBUFFER, rt_fbo); gl::Viewport(0, 0, self.out.0, self.out.1); } }
             self.draw_parts(li, rt_fbo);
-            let l = &self.layers[li];
-            if l.full && l.ping.is_none() { continue; }
-            let src_tex = if l.full { self.render_effects(li, t, self.scene_rt.as_ref().map(|r| r.tex)) } else { self.render_effects(li, t, None) };
+            let (full, has_ping) = (self.layers[li].full, self.layers[li].ping.is_some());
+            if self.layers[li].hidden { continue; } // render-target producer: drawn on demand by its consumers
+            if full && !has_ping { continue; }
+            let src_tex = self.ensure(li, t).0;
             let l = &self.layers[li];
             let mvp = scene::mul(&self.view, &l.world);
             let mvp = if l.full { scene::ident() } else { mvp };
@@ -452,7 +559,7 @@ impl Engine {
             unsafe {
                 gl::BindFramebuffer(gl::FRAMEBUFFER, rt_fbo);
                 gl::Viewport(0, 0, self.out.0, self.out.1);
-                if l.full { gl::Disable(gl::BLEND); } else { gl::Enable(gl::BLEND); }
+                if l.full && !l.composite { gl::Disable(gl::BLEND); } else { gl::Enable(gl::BLEND); }
                 match l.blend { Blend::Alpha => gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA), Blend::Additive => gl::BlendFunc(gl::SRC_ALPHA, gl::ONE), Blend::Multiply => gl::BlendFuncSeparate(gl::DST_COLOR, gl::ONE_MINUS_SRC_ALPHA, gl::ZERO, gl::ONE), Blend::Screen => gl::BlendFuncSeparate(gl::ONE_MINUS_DST_COLOR, gl::ONE, gl::ZERO, gl::ONE) }
                 gl::UseProgram(self.prog);
                 gl::Uniform1f(self.u_pm, if matches!(l.blend, Blend::Multiply | Blend::Screen) { 1.0 } else { 0.0 });
@@ -497,9 +604,70 @@ impl Engine {
     fn draw_parts(&mut self, at: usize, fbo: u32) { if self.parts.is_empty() { return; } self.parts.draw(at, &self.view, fbo, self.out); unsafe { gl::BindVertexArray(self.vao); } }
 
     /// Runs the layer's effect chain; returns the texture holding the final image.
-    fn render_effects(&self, li: usize, t: f32, src: Option<u32>) -> u32 {
+    /// Draws a layer's finished image into its scene-space target, so other layers sample it at scene UVs
+    /// (a fullscreen composition layer, or a layer covering the scene, sees the producer at its real place).
+    fn export_layer(&mut self, li: usize, src: u32, t: f32) -> (u32, i32, i32) {
+        let Some(rt) = self.layers[li].rt else { return (src, self.out.0, self.out.1) };
         let l = &self.layers[li];
-        let Some((a, b)) = &l.ping else { return l.tex };
+        let mvp = if l.full { scene::ident() } else { scene::mul(&self.view, &l.world) };
+        let lsize = if l.full { [2.0, 2.0] } else { l.size };
+        let (uv, uo) = if l.ping.is_some() { ([1.0, 1.0], [0.0, 0.0]) } else { l.cell(t) };
+        unsafe {
+            gl::BindFramebuffer(gl::FRAMEBUFFER, rt.fbo);
+            gl::Viewport(0, 0, rt.w, rt.h);
+            gl::ClearColor(0.0, 0.0, 0.0, 0.0); gl::Clear(gl::COLOR_BUFFER_BIT);
+            gl::Disable(gl::BLEND);
+            gl::UseProgram(self.prog);
+            gl::UniformMatrix4fv(self.u_mvp, 1, gl::FALSE, mvp.as_ptr());
+            gl::Uniform2f(self.u_size, lsize[0], lsize[1]);
+            gl::Uniform4f(self.u_tint, l.color[0], l.color[1], l.color[2], l.alpha);
+            gl::Uniform1f(self.u_flip, 0.0);
+            gl::Uniform2f(self.u_uvs, uv[0], uv[1]); gl::Uniform2f(self.u_uvo, uo[0], uo[1]);
+            gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, src);
+            gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
+        }
+        (rt.tex, rt.w, rt.h)
+    }
+
+    /// Renders layer `li` at most once per frame; cross-layer producers are rendered first (recursively).
+    /// Returns the texture holding the layer's image plus its size.
+    fn ensure(&mut self, li: usize, t: f32) -> (u32, i32, i32) {
+        if self.frame_state.len() <= li { self.frame_state.resize(li + 1, 0); self.frame_tex.resize(li + 1, None); }
+        if let Some(v) = self.frame_tex[li] { return v; }
+        if self.frame_state[li] == 1 {
+            // sampling cycle: fall back to the producer's own texture
+            let l = &self.layers[li];
+            return (l.tex, (l.tex_wh.0.max(1.0)) as i32, (l.tex_wh.1.max(1.0)) as i32);
+        }
+        self.frame_state[li] = 1;
+        let l0 = &self.layers[li];
+        let src = if l0.full && !l0.composite { self.scene_rt.as_ref().map(|r| r.tex) } else { None };
+        let r = self.render_effects(li, t, src);
+        let r = if self.layers[li].sampled { self.export_layer(li, r.0, t) } else { r };
+        self.frame_state[li] = 2;
+        self.frame_tex[li] = Some(r);
+        r
+    }
+
+    fn render_effects(&mut self, li: usize, t: f32, src: Option<u32>) -> (u32, i32, i32) {
+        // layers whose render targets this chain samples must be drawn before the chain starts
+        let mut deps: Vec<usize> = vec![];
+        {
+            let l = &self.layers[li];
+            for p in &l.passes { for (_, n) in &p.binds {
+                if n == "previous" || l.named.contains_key(n) { continue; }
+                if let Some(d) = rt_layer_id(n).and_then(|id| self.prov.get(&id).copied()) { if d != li && !deps.contains(&d) { deps.push(d); } }
+            } }
+        }
+        let mut ext: HashMap<String, (u32, i32, i32)> = HashMap::new();
+        for d in deps {
+            let v = self.ensure(d, t);
+            let did = self.layers[d].id;
+            let names: Vec<String> = self.layers[li].passes.iter().flat_map(|p| p.binds.iter().filter(|(_, n)| rt_layer_id(n) == Some(did)).map(|(_, n)| n.clone())).collect();
+            for n in names { ext.insert(n, v); }
+        }
+        let l = &self.layers[li];
+        let Some((a, b)) = l.ping else { return (l.tex, (l.tex_wh.0.max(1.0)) as i32, (l.tex_wh.1.max(1.0)) as i32) };
         unsafe {
             gl::Disable(gl::BLEND);
             gl::BindFramebuffer(gl::FRAMEBUFFER, a.fbo);
@@ -516,9 +684,9 @@ impl Engine {
         // the fullscreen effect quad: vertex positions are [-1,1] already, so the MVP is the identity
         let mut cur = (a, b); // cur.0 holds "previous", cur.1 is the destination
         let ident = scene::ident();
-        let dbg_n: usize = std::env::var("WF_PASSN").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX); let mut dbg_last: Option<u32> = None;
+        let dbg_n: usize = std::env::var("WF_PASSN").ok().and_then(|v| v.parse().ok()).unwrap_or(usize::MAX); let mut dbg_last: Option<(u32, i32, i32)> = None;
         for p in l.passes.iter().take(dbg_n) {
-            let dst = match &p.target { Some(n) => l.named.get(n).unwrap_or(cur.1), None => cur.1 };
+            let dst = match &p.target { Some(n) => l.named.get(n).copied().unwrap_or(cur.1), None => cur.1 };
             unsafe {
                 gl::BindFramebuffer(gl::FRAMEBUFFER, dst.fbo);
                 gl::Viewport(0, 0, dst.w, dst.h);
@@ -530,7 +698,9 @@ impl Engine {
             for unit in 0..n_units {
                 let (id, r) = if let Some(b) = p.binds.iter().find(|b| b.0 == unit) {
                     if b.1 == "previous" { (cur.0.tex, (cur.0.w as f32, cur.0.h as f32)) }
-                    else if let Some(n) = l.named.get(&b.1) { (n.tex, (n.w as f32, n.h as f32)) } else { (cur.0.tex, (cur.0.w as f32, cur.0.h as f32)) }
+                    else if let Some(n) = l.named.get(&b.1) { (n.tex, (n.w as f32, n.h as f32)) }
+                    else if let Some(e) = ext.get(&b.1) { (e.0, (e.1 as f32, e.2 as f32)) }
+                    else { (cur.0.tex, (cur.0.w as f32, cur.0.h as f32)) }
                 } else if let Some(Some((id, (w, h)))) = p.textures.get(unit) { (*id, (*w as f32, *h as f32)) } else { (cur.0.tex, (cur.0.w as f32, cur.0.h as f32)) };
                 res.push(r);
                 unsafe { gl::ActiveTexture(gl::TEXTURE0 + unit as u32); gl::BindTexture(gl::TEXTURE_2D, id); }
@@ -550,11 +720,11 @@ impl Engine {
                 let v: [f32; 20] = [-1.0, -1.0, 0.0, 0.0, 0.0, 1.0, -1.0, 0.0, 1.0, 0.0, -1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0];
                 unsafe { gl::BufferSubData(gl::ARRAY_BUFFER, 0, 80, v.as_ptr() as *const _); }
             }
-            if p.target.is_none() { cur = (cur.1, cur.0); dbg_last = None; } else { dbg_last = Some(dst.tex); }
+            if p.target.is_none() { cur = (cur.1, cur.0); dbg_last = None; } else { dbg_last = Some((dst.tex, dst.w, dst.h)); }
         }
         if let Some(t) = dbg_last { return t; }
         unsafe { gl::ActiveTexture(gl::TEXTURE0); }
-        cur.0.tex
+        (cur.0.tex, cur.0.w, cur.0.h)
     }
 }
 
@@ -576,5 +746,16 @@ mod layout_tests {
             assert!((x0 + 1.0).abs() < 1e-4 && (y0 + 1.0).abs() < 1e-4, "{ow}x{oh}: {x0} {y0}");
             assert!((x1 - 1.0).abs() < 1e-4 && (y1 - 1.0).abs() < 1e-4, "{ow}x{oh}: {x1} {y1}");
         }
+    }
+
+    /// Cross-layer sampling names: `_rt_imageLayerComposite_<id>_a` (and the `_b` variant) map to the scene object id.
+    #[test]
+    fn render_target_names() {
+        assert_eq!(rt_layer_id("_rt_imageLayerComposite_42_a"), Some(42));
+        assert_eq!(rt_layer_id("_rt_imageLayerComposite_310_b"), Some(310));
+        assert_eq!(rt_layer_id("_rt_imageLayerComposite_7"), Some(7));
+        assert_eq!(rt_layer_id("_rt_default"), None);
+        assert_eq!(rt_layer_id("g_Texture0"), None);
+        assert_eq!(rt_layer_id("_rt_imageLayerComposite_x_a"), None);
     }
 }

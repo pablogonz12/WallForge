@@ -1,6 +1,7 @@
 """Persistent settings (~/.config/wallforge/config.json)."""
 from __future__ import annotations
 
+import copy
 import json
 import os
 import tempfile
@@ -20,6 +21,10 @@ DEFAULTS = {
     "ultrawide_on_16_9": True,  # allow ultrawide wallpapers on 16:9 screens (cropped to fill)
     "safe_content": True,  # Discover hides Mature/Questionable
     "autostart": False,
+    "rotate_minutes": 0,  # change the wallpaper every N minutes, 0 = never
+    "rotate_shuffle": True,  # pick at random instead of the next wallpaper in the library
+    "rotate_favorites": False,  # rotate only through favourites
+    "last_rotate": 0,  # unix time of the last automatic change
     "check_updates": True,
     "auto_update": True,
     "last_update_check": 0,
@@ -50,7 +55,7 @@ DEFAULTS = {
 
 
 def _merge(base, over):
-    out = dict(base)
+    out = copy.deepcopy(base)
     for k, v in (over or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict) and k not in ("outputs", "values", "volumes"):
             out[k] = _merge(out[k], v)
@@ -61,7 +66,7 @@ def _merge(base, over):
 
 class Config:
     def __init__(self):
-        self.data = dict(DEFAULTS)
+        self.data = copy.deepcopy(DEFAULTS)
         self.load()
 
     def load(self):

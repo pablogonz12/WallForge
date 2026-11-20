@@ -2,6 +2,11 @@
 
 ## 0.6.0
 
+### New
+
+- **Wallpaper rotation**: Settings > Playback changes the wallpaper every N minutes, at random or in library order,
+  optionally only through favourites.
+
 ### Performance and battery
 
 - **Render resolution** (Settings > Effects and power): scene wallpapers can be drawn at 25–100% of the screen size
@@ -9,6 +14,12 @@
 - **Battery saving**: while discharging, the frame rate is capped at 30 fps and the render scale at 75% (on by
   default); optionally pause every wallpaper on battery and resume when you plug in.
 - Web wallpapers follow the reduced frame rate too.
+
+### Compatibility
+
+- Effects can now sample **another layer's rendered image** (`_rt_imageLayerComposite_*`), including layers that are
+  hidden in the scene. Shadow Keep's moon and the pixel-cyberpunk xray scene render their missing content instead of
+  a blurry or black area.
 
 ### Stability
 
