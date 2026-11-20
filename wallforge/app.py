@@ -397,6 +397,37 @@ class Window(Adw.ApplicationWindow):
             GLib.source_remove(self._deb)
         self._deb = GLib.timeout_add(900, self._live_apply)
 
+    def _run_doctor(self):
+        """Run the setup checks off the UI thread and show what they found."""
+
+        def work():
+            try:
+                from . import doctor
+
+                return doctor.report(doctor.checks())[0]
+            except Exception as e:  # never let a checker crash the app
+                return f"Setup check could not run: {e}"
+
+        def done(text):
+            d = Adw.AlertDialog(heading="Setup check", body="")
+            tv = Gtk.TextView(editable=False, monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR)
+            tv.get_buffer().set_text(text)
+            d.set_extra_child(Gtk.ScrolledWindow(child=tv, min_content_height=320, min_content_width=620))
+            d.add_response("copy", "Copy")
+            d.add_response("close", "Close")
+            d.set_default_response("close")
+
+            def resp(dlg, r):
+                if r == "copy":
+                    self.get_clipboard().set(text)
+                    self.toasts.add_toast(Adw.Toast(title="Setup check copied"))
+
+            d.connect("response", resp)
+            d.present(self)
+            return False
+
+        threading.Thread(target=lambda: GLib.idle_add(done, work()), daemon=True).start()
+
     def _copy_diagnostics(self):
         """Copy what a bug report needs: versions, system, the selected wallpaper's renderer report and its log."""
         lines = [f"WallForge {__version__} (commit {updater.current_commit() or 'unknown'})"]
@@ -1237,6 +1268,11 @@ class Window(Adw.ApplicationWindow):
         top_switch(gu, "Check for updates", "check_updates", "At start and every few hours, asks GitHub whether a newer WallForge exists.")
         top_switch(gu, "Install updates automatically", "auto_update", "Git installs only: downloads the new version in the background, "
                    "checks it loads, and asks you to restart. Package installs update through your package manager.")
+        rs = Adw.ActionRow(title="Check my setup", subtitle="Wayland, layer-shell, Wallpaper Engine assets, renderer and video decode, with what to fix.")
+        bs = Gtk.Button(label="Check", valign=Gtk.Align.CENTER)
+        bs.connect("clicked", lambda _b: self._run_doctor())
+        rs.add_suffix(bs)
+        gu.add(rs)
         rd = Adw.ActionRow(title="Copy diagnostics", subtitle="Version, system, renderer report and log lines, ready to paste into a bug report.")
         bd = Gtk.Button(label="Copy", valign=Gtk.Align.CENTER)
         bd.connect("clicked", lambda _b: self._copy_diagnostics())

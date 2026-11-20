@@ -4,7 +4,7 @@
 
 ### New
 
-- `wallforge --doctor` checks Wayland, GTK, layer-shell, the renderer build, Wallpaper Engine assets, the Workshop
+- Settings > Updates > **Check my setup** runs the setup check in a dialog and copies its report; `wallforge --doctor` checks Wayland, GTK, layer-shell, the renderer build, Wallpaper Engine assets, the Workshop
   library, ffmpeg/VAAPI and WebKit, then prints what to fix. Read-only, works without a display, exits 1 on failures.
 - `tools/bench.sh <workshop-id>` reproduces the performance table: GPU, CPU, RSS and scene texture memory per
   wallpaper, against an idle baseline.
