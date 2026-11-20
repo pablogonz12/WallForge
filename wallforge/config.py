@@ -10,7 +10,7 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / 
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULTS = {
-    "version": 4,
+    "version": 5,
     "engine_dir": "",  # empty -> auto-detect
     "renderer": "native",  # native (wallforge-render, used where it can) | legacy (linux-wallpaperengine only)
     "assets_dir": "",  # empty -> auto (own download, then Steam)
@@ -28,6 +28,9 @@ DEFAULTS = {
         "scaling": "auto",  # auto (best fit per wallpaper and screen) | fill (crop) | fit | stretch | default
         "clamp": "clamp",  # clamp|border|repeat
         "fps": 30,
+        "render_scale": 100,  # render resolution in percent, 25..100
+        "reduce_on_battery": True,  # lower fps and resolution while on battery
+        "pause_on_battery": False,  # stop wallpapers (and do not restart them) while on battery
         "layer": "bottom",  # bottom|background (background pairs with niri place-within-backdrop)
         "silent": False,
         "volume": 100,
@@ -84,6 +87,9 @@ class Config:
         if self.data.get("version", 1) < 4:  # v4: ultrawide wallpapers are allowed on 16:9 screens (cropped)
             self.data["ultrawide_on_16_9"] = True
             self.data["version"] = 4
+            self.save()
+        if self.data.get("version", 1) < 5:  # v5: render scale and battery saving; the new engine keys come from defaults
+            self.data["version"] = 5
             self.save()
 
     def save(self):

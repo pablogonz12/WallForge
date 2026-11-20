@@ -96,6 +96,11 @@ class Window(Adw.ApplicationWindow):
         self.web_page = 1
         self.web_items: list[dict] = []
         self.known_ids: set[str] = set()
+        self._applied: dict[str, str] = {}  # output -> item id we last started (watchdog memory)
+        self._restarts: dict[str, list[float]] = {}  # output -> restart timestamps
+        self._started: dict[str, float] = {}  # output -> when we last tried to start it
+        self._crashed: set[str] = set()  # outputs given up on after repeated crashes
+        self._battery_paused = False
 
         self.toasts = Adw.ToastOverlay()
         self.set_content(self.toasts)
@@ -440,6 +445,7 @@ class Window(Adw.ApplicationWindow):
                 for o in outputs:
                     engine.start(self.cfg, it, o)
                     self.cfg.data["outputs"][o] = {"id": it.id}
+                    self._remember(o, it.id)
                 self.cfg.save()
                 if outputs:
                     theme.sync(self.cfg, it, outputs[0] if len(outputs) == 1 else None)
@@ -610,8 +616,72 @@ class Window(Adw.ApplicationWindow):
         return self.play_box
 
     def _poll_playing(self):
+        try:
+            self._watchdog()
+        except Exception:
+            pass
         self.refresh_playing()
         return True
+
+    def _remember(self, output: str, item_id: str):
+        """Track what we started on an output so the watchdog can restart it."""
+        self._applied[output] = item_id
+        self._restarts.pop(output, None)
+        self._crashed.discard(output)
+        self._started[output] = time.time()
+
+    def _forget(self, output: str):
+        """Explicit stop: no restart for this output."""
+        self._applied.pop(output, None)
+        self._restarts.pop(output, None)
+        self._crashed.discard(output)
+        self._started.pop(output, None)
+
+    def stop_output(self, output: str):
+        self._forget(output)
+        try:
+            engine.stop(output)
+        except Exception:
+            pass
+
+    def _watchdog(self):
+        """Restart wallpapers whose player died, unless battery saving says otherwise."""
+        if engine.pause_for_battery(self.cfg):
+            if not self._battery_paused:
+                self._battery_paused = True
+                for o in list(self._applied):
+                    try:
+                        engine.stop(o)
+                    except Exception:
+                        pass
+            return
+        self._battery_paused = False
+        if not self._applied:
+            return
+        by_id = {i.id: i for i in self.items}
+        now = time.time()
+        for output, iid in list(self._applied.items()):
+            if engine.running(output):
+                self._crashed.discard(output)
+                continue
+            if output in self._crashed or now - self._started.get(output, 0) < 8:
+                continue  # give a fresh start time to come up
+            it = by_id.get(iid)
+            if not it or it.broken:
+                continue
+            hist = [t for t in self._restarts.get(output, []) if now - t < 300]
+            self._restarts[output] = hist
+            if len(hist) >= 3:
+                self._crashed.add(output)
+                self.toasts.add_toast(Adw.Toast(title=f"{output}: stopped after repeated crashes"))
+                continue
+            try:
+                engine.start(self.cfg, it, output)
+                hist.append(now)
+                self._started[output] = now
+            except Exception:
+                self._crashed.add(output)
+                self.toasts.add_toast(Adw.Toast(title=f"{output}: could not restart the wallpaper"))
 
     def refresh_playing(self):
         child = self.play_box.get_first_child()
@@ -632,9 +702,13 @@ class Window(Adw.ApplicationWindow):
                 lab = Gtk.Label(label=f"{name}: {title}", ellipsize=3, max_width_chars=34)
                 stop = Gtk.Button(icon_name="media-playback-stop-symbolic", tooltip_text="Stop", valign=Gtk.Align.CENTER)
                 stop.add_css_class("flat")
-                stop.connect("clicked", lambda _b, n=name: (engine.stop(n), self.refresh_playing()))
+                stop.connect("clicked", lambda _b, n=name: (self.stop_output(n), self.refresh_playing()))
                 b.append(lab)
                 b.append(stop)
+            elif name in self._crashed:
+                lab = Gtk.Label(label=f"{name}: stopped after repeated crashes")
+                lab.add_css_class("dim-label")
+                b.append(lab)
             else:
                 lab = Gtk.Label(label=f"{name}: idle")
                 lab.add_css_class("dim-label")
@@ -945,6 +1019,9 @@ class Window(Adw.ApplicationWindow):
         pg.add(g2)
         g1 = g2
         switch("Disable particles", "disable_particles")
+        spin("Render resolution (%)", "render_scale", 25, 100)
+        switch("Reduce frame rate and resolution on battery", "reduce_on_battery")
+        switch("Pause wallpapers on battery", "pause_on_battery")
         switch("Disable mouse interaction", "disable_mouse")
         switch("Disable parallax", "disable_parallax")
         switch("Keep playing under fullscreen apps", "no_fullscreen_pause")

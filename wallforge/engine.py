@@ -76,6 +76,45 @@ def use_native(cfg, item: library.Item) -> bool:
 _ASPECT_CACHE: dict[str, float | None] = {}
 
 
+def on_battery() -> bool:
+    """True when a real battery reports Discharging (fake power supplies whose type is not Battery are ignored)."""
+    try:
+        for d in Path("/sys/class/power_supply").iterdir():
+            try:
+                if (d / "type").read_text().strip().lower() != "battery":
+                    continue
+                if (d / "status").read_text().strip().lower() == "discharging":
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return False
+
+
+def effective(cfg) -> tuple[int, int]:
+    """(fps, render_scale) to use now, lowered when on battery and the setting allows it."""
+    e = cfg.data["engine"]
+    try:
+        fps = max(1, int(e.get("fps", 30)))
+    except (TypeError, ValueError):
+        fps = 30
+    try:
+        scale = max(25, min(100, int(e.get("render_scale", 100))))
+    except (TypeError, ValueError):
+        scale = 100
+    if e.get("reduce_on_battery", True) and on_battery():
+        fps = max(15, min(fps, 30))
+        scale = min(scale, 75)
+    return fps, scale
+
+
+def pause_for_battery(cfg) -> bool:
+    """True when wallpapers should be paused because of the battery setting."""
+    return bool(cfg.data["engine"].get("pause_on_battery")) and on_battery()
+
+
+
 def wallpaper_aspect(item: library.Item) -> float | None:
     """The wallpaper's own width/height, from the scene projection or by probing the video."""
     if item.aspect:
@@ -125,11 +164,13 @@ def build_native_args(cfg, item: library.Item, output: str, overrides: dict | No
         imgs = {k: v for k, v in vals.items() if (props.get(k) or {}).get("type") == "scenetexture"}
         if imgs:
             run = texpatch.patched_dir(item.run_dir, imgs) or item.run_dir  # None when there is no package to patch
+    fps, scale = effective(cfg)
     a = [str(paths.find_render()), "--output", output, "--bg", str(run), "--scaling", scaling,
-         "--fps", str(e["fps"]), "--layer", e.get("layer", "bottom")]
+         "--fps", str(fps), "--layer", e.get("layer", "bottom")]
     vol = cfg.volume_for(item.id)
     a += ["--volume", str(vol)] if vol else ["--silent"]
     if item.kind == "scene":
+        a += ["--scale", str(scale)]
         a_dir = paths.find_assets(cfg.data["assets_dir"])
         if a_dir:
             a += ["--assets-dir", str(a_dir)]
