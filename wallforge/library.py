@@ -25,7 +25,17 @@ class Item:
     raw: dict = field(default_factory=dict)
     broken: str | None = None  # reason it cannot run
     aspect: float | None = None  # wallpaper's own aspect ratio when known (scenes)
-    source: str = "Workshop"  # Workshop | Local | Lively
+    source: str = "Workshop"  # Workshop | Local | Lively | Wikimedia
+
+    @property
+    def source_label(self) -> str:
+        """Badge text for the UI."""
+        return {"Workshop": "Wallpaper Engine"}.get(self.source, self.source)
+
+    @property
+    def credit(self) -> str:
+        """Attribution line for items that carry one (Wikimedia Commons)."""
+        return str(self.raw.get("attribution") or "")
 
     # ---- resolution --------------------------------------------------------
     @property

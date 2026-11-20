@@ -32,8 +32,10 @@ from . import (  # noqa: E402
     rotation,
     theme,
     updater,
+    commons,
     importer,
     weimport,
+    uninstall,
     workshop,
 )
 from .props import PropertyEditor  # noqa: E402
@@ -41,12 +43,15 @@ from .props import PropertyEditor  # noqa: E402
 APP_ID = "dev.wallforge.Wallforge"
 THUMBS = Path.home() / ".cache/wallforge/thumbs"
 POOL = ThreadPoolExecutor(4)
+LIB_SOURCES = ["Wallpaper Engine", "Lively", "Local", "Wikimedia"]
+WEB_SOURCES = ["Wallpaper Engine Workshop", "Wikimedia Commons"]
 
 CSS = """
 .wf-card { padding: 0; }
 .wf-card picture { border-radius: 12px 12px 0 0; }
 .wf-title { font-weight: 600; }
 .wf-badge { font-size: 0.75em; padding: 1px 8px; border-radius: 99px; background: alpha(currentColor, .12); }
+.wf-src { background: alpha(@accent_bg_color, .22); }
 .wf-active { outline: 2px solid @accent_bg_color; outline-offset: -2px; border-radius: 12px; }
 """
 
@@ -70,7 +75,7 @@ def load_thumb(src: str, cb, size=(480, 270)):
     POOL.submit(work)
 
 
-def make_card(title: str, preview: str | None, badge: str = "", extra: str = "") -> Gtk.Box:
+def make_card(title: str, preview: str | None, badge: str = "", extra: str = "", source: str = "", source_extra: str = "") -> Gtk.Box:
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     box.add_css_class("card")
     box.add_css_class("wf-card")
@@ -95,6 +100,18 @@ def make_card(title: str, preview: str | None, badge: str = "", extra: str = "")
         e.add_css_class("caption")
         row.append(e)
     inner.append(row)
+    if source:  # where the wallpaper comes from
+        srow = Gtk.Box(spacing=6)
+        sb = Gtk.Label(label=source)
+        sb.add_css_class("wf-badge")
+        sb.add_css_class("wf-src")
+        srow.append(sb)
+        if source_extra:
+            se = Gtk.Label(label=source_extra, xalign=0, ellipsize=3)
+            se.add_css_class("dim-label")
+            se.add_css_class("caption")
+            srow.append(se)
+        inner.append(srow)
     box.append(inner)
     return box
 
@@ -177,11 +194,15 @@ class Window(Adw.ApplicationWindow):
         bar = Gtk.Box(spacing=8, margin_top=8, margin_bottom=8, margin_start=12, margin_end=12)
         self.search = Gtk.SearchEntry(placeholder_text="Search installed wallpapers", hexpand=True)
         self.search.connect("search-changed", lambda *_: self.filter.changed(Gtk.FilterChange.DIFFERENT))
-        self.type_dd = Gtk.DropDown.new_from_strings(["All", "Scene", "Video", "Web", "Favorites", "Local"])
+        self.type_dd = Gtk.DropDown.new_from_strings(["All", "Scene", "Video", "Web", "Favorites"])
         self.type_dd.connect("notify::selected", lambda *_: self.filter.changed(Gtk.FilterChange.DIFFERENT))
+        self.src_dd = Gtk.DropDown.new_from_strings(["All sources", *LIB_SOURCES])
+        self.src_dd.set_tooltip_text("Where the wallpaper comes from")
+        self.src_dd.connect("notify::selected", lambda *_: self.filter.changed(Gtk.FilterChange.DIFFERENT))
         self.sort_dd = Gtk.DropDown.new_from_strings(["A to Z", "Newest first", "Favorites first"])
         self.sort_dd.connect("notify::selected", lambda *_: self.reload_library())
         bar.append(self.search)
+        bar.append(self.src_dd)
         bar.append(self.type_dd)
         bar.append(self.sort_dd)
         main.append(bar)
@@ -217,11 +238,12 @@ class Window(Adw.ApplicationWindow):
         q = self.search.get_text().strip().lower()
         if q and q not in it.title.lower() and not any(q in t.lower() for t in it.tags):
             return False
+        src = self.src_dd.get_selected_item().get_string()
+        if src != "All sources" and it.source_label != src:
+            return False
         mode = self.type_dd.get_selected_item().get_string()
         if mode == "Favorites":
             return it.id in self.cfg.data["favorites"]
-        if mode == "Local":
-            return it.source != "Workshop"
         if mode != "All" and it.kind != mode.lower():
             return False
         return True
@@ -272,7 +294,8 @@ class Window(Adw.ApplicationWindow):
                 badge = "unsupported" if it.broken.startswith("3D") else "missing base"
             elif it.ultrawide:
                 badge += " 21:9"
-            card = make_card(it.title, str(it.preview) if it.preview else None, badge)
+            card = make_card(it.title, str(it.preview) if it.preview else None, badge, source=it.source_label,
+                             source_extra=str(it.raw.get("license") or ""))
             if it.id in active:
                 card.add_css_class("wf-active")
             fc = Gtk.FlowBoxChild(child=card)
@@ -307,7 +330,7 @@ class Window(Adw.ApplicationWindow):
         title = Gtk.Label(label=it.title, xalign=0, wrap=True)
         title.add_css_class("title-2")
         box.append(title)
-        meta = f"{it.kind}" + (" preset" if it.is_preset else "") + f"  |  id {it.id}" + (f"  |  {it.source}" if it.source != "Workshop" else "")
+        meta = f"{it.kind}" + (" preset" if it.is_preset else "") + f"  |  {it.source_label}" + (f"  |  id {it.id}" if it.source == "Workshop" else "")
         ml = Gtk.Label(label=meta, xalign=0)
         ml.add_css_class("dim-label")
         box.append(ml)
@@ -316,6 +339,8 @@ class Window(Adw.ApplicationWindow):
             warn.add_css_class("error")
             box.append(warn)
 
+        if it.credit:
+            box.append(self._credit_box(it.raw))
         outs = self._mons or monitors.outputs()
         if it.ultrawide:
             note = Gtk.Label(label="Made for ultrawide screens. On 16:9 monitors it is cropped to fill (turn that off in Settings to skip it).",
@@ -361,15 +386,16 @@ class Window(Adw.ApplicationWindow):
                            if wid else "Not on the Steam Workshop, so there is no link to share")
         share.connect("clicked", lambda _b: self._share(wid))
         tools.append(fav)
-        if it.source != "Workshop" and importer.is_local(it.dir):
-            rm = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Remove from WallForge (the original file is kept)")
-            rm.connect("clicked", lambda _b: self._remove_local(it))
-            tools.append(rm)
         tools.append(share)
         tools.append(folder)
         tools.append(reset)
         tools.append(close)
         box.append(tools)
+        if uninstall.plan(it).action != "none":
+            rm = Gtk.Button(label="Uninstall", tooltip_text="Remove this wallpaper from your computer")
+            rm.add_css_class("destructive-action")
+            rm.connect("clicked", lambda _b: self.uninstall_item(it))
+            box.append(rm)
 
         props = it.properties()
         if props:
@@ -927,7 +953,13 @@ class Window(Adw.ApplicationWindow):
         self.w_search.connect("activate", lambda *_: self.web_search(1))
         self.w_sort = Gtk.DropDown.new_from_strings(["Trending", "Most recent", "Most subscribed"])
         self.w_type = Gtk.DropDown.new_from_strings(["Any type", "Scene", "Video", "Web"])
-        for dd in (self.w_sort, self.w_type):
+        self.w_topic = Gtk.DropDown.new_from_strings(list(commons.TOPICS))
+        self.w_topic.set_visible(False)
+        self.w_topic.set_tooltip_text("Wikimedia Commons category")
+        self.w_src = Gtk.DropDown.new_from_strings(WEB_SOURCES)
+        self.w_src.set_tooltip_text("Where to look for wallpapers")
+        self.w_src.connect("notify::selected", self._on_source)
+        for dd in (self.w_sort, self.w_type, self.w_topic):
             dd.connect("notify::selected", lambda *_: self.web_search(1))
         self.w_prev = Gtk.Button(icon_name="go-previous-symbolic")
         self.w_next = Gtk.Button(icon_name="go-next-symbolic")
@@ -935,7 +967,7 @@ class Window(Adw.ApplicationWindow):
         self.w_next.connect("clicked", lambda _b: self.web_search(self.web_page + 1))
         self.w_label = Gtk.Label(label="")
         self.w_label.add_css_class("dim-label")
-        for w in (self.w_search, self.w_sort, self.w_type, self.w_prev, self.w_label, self.w_next):
+        for w in (self.w_src, self.w_search, self.w_sort, self.w_type, self.w_topic, self.w_prev, self.w_label, self.w_next):
             bar.append(w)
         page.append(bar)
         self.w_spin = Gtk.Spinner(spinning=False, halign=Gtk.Align.CENTER)
@@ -953,10 +985,26 @@ class Window(Adw.ApplicationWindow):
             self._first_discover = False
             self.web_search(1)
 
+    @property
+    def _commons(self) -> bool:
+        return self.w_src.get_selected() == 1
+
+    def _on_source(self, *_):
+        c = self._commons
+        self.w_sort.set_visible(not c)
+        self.w_type.set_visible(not c)
+        self.w_topic.set_visible(c)
+        self.w_search.set_placeholder_text("Search Wikimedia Commons videos (free licences)" if c
+                                           else "Search the Steam Workshop, or paste a Workshop link")
+        self.w_search.set_text("")
+        self.web_search(1)
+
     def web_search(self, page: int):
         if page < 1:
             return
         self.web_page = page
+        if self._commons:
+            return self._commons_search(page)
         sort = ["trend", "mostrecent", "totaluniquesubscribers"][self.w_sort.get_selected()]
         t = self.w_type.get_selected_item().get_string()
         tags = [] if t == "Any type" else [t]
@@ -981,6 +1029,139 @@ class Window(Adw.ApplicationWindow):
             except Exception as e:
                 GLib.idle_add(self._web_error, str(e))
         threading.Thread(target=work, daemon=True).start()
+
+    def _commons_search(self, page: int):
+        q = self.w_search.get_text().strip()
+        topic = self.w_topic.get_selected_item().get_string()
+        self.w_spin.start()
+
+        def work():
+            try:
+                res = commons.browse(q, topic, page)
+                GLib.idle_add(self._show_commons, res)
+            except Exception as e:
+                GLib.idle_add(self._web_error, str(e), "Wikimedia Commons")
+        threading.Thread(target=work, daemon=True).start()
+
+    def _clear_web(self):
+        child = self.w_flow.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self.w_flow.remove(child)
+            child = nxt
+
+    def _show_commons(self, res):
+        if not self._commons:  # the user switched source while this was loading
+            return False
+        self.w_spin.stop()
+        self._clear_web()
+        self.w_label.set_text(f"page {res['page']}")
+        self.w_prev.set_sensitive(self.web_page > 1)
+        self.w_next.set_sensitive(res["has_next"])
+        if not res["items"]:
+            self.toasts.add_toast(Adw.Toast(title="No suitable free videos on this page (landscape, 720p or more)"))
+        for r in res["items"]:
+            size = f"{r['size'] / 1e6:.0f} MB" if r["size"] else ""
+            card = make_card(r["title"], r["preview"], r["license"], size, source="Wikimedia Commons", source_extra=r["author"][:28])
+            click = Gtk.GestureClick()
+            click.connect("released", lambda *_a, r=r: self._commons_detail(r))
+            card.add_controller(click)
+            card.set_cursor_from_name("pointer")
+            inner = card.get_last_child()
+            btn = Gtk.Button()
+            self._style_commons(btn, r)
+            btn.connect("clicked", lambda b, r=r: self._commons_get(b, r))
+            btn.set_hexpand(True)
+            row = Gtk.Box(spacing=6)
+            row.append(btn)
+            inner.append(row)
+            self.w_flow.append(card)
+        return False
+
+    def _style_commons(self, btn, r):
+        btn.remove_css_class("suggested-action")
+        if commons.installed(r["pageid"]):
+            btn.set_label("Installed")
+            btn.set_sensitive(False)
+        else:
+            btn.set_label("Download")
+            btn.set_sensitive(True)
+            btn.add_css_class("suggested-action")
+
+    def _commons_get(self, btn, r, done=None):
+        btn.set_sensitive(False)
+        btn.set_label("Downloading...")
+
+        def work():
+            try:
+                d = commons.download(r)
+                GLib.idle_add(self._commons_done, btn, r, d, None, done)
+            except Exception as e:
+                GLib.idle_add(self._commons_done, btn, r, None, str(e), done)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _commons_done(self, btn, r, d, err, done):
+        if err:
+            self._style_commons(btn, r)
+            self.toasts.add_toast(Adw.Toast(title=f"Download failed: {err[:80]}"))
+        else:
+            self.reload_library()
+            self._style_commons(btn, r)
+            self.toasts.add_toast(Adw.Toast(title=f"Added {r['title'][:40]} to your library"))
+        if done:
+            done()
+        return False
+
+    def _commons_detail(self, r):
+        """Detail page of a Commons file: big preview, licence and author (required credit), download or uninstall."""
+        dlg = Adw.Dialog(title="Wikimedia Commons", content_width=560, content_height=900)
+        tv = Adw.ToolbarView()
+        tv.add_top_bar(Adw.HeaderBar())
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=12, margin_bottom=16, margin_start=16, margin_end=16)
+        pic = Gtk.Picture(content_fit=Gtk.ContentFit.COVER, can_shrink=True, height_request=260)
+        pic.set_overflow(Gtk.Overflow.HIDDEN)
+        pic.add_css_class("card")
+        load_thumb(r["preview"], lambda t: pic.set_paintable(t), (960, 540))
+        box.append(pic)
+        t = Gtk.Label(label=r["title"], xalign=0, wrap=True)
+        t.add_css_class("title-2")
+        box.append(t)
+        m = Gtk.Label(label=f"video  |  Wikimedia Commons  |  {r['width']}x{r['height']}  |  {r['duration']:.0f} s"
+                            + (f"  |  about {r['size'] / 1e6:.0f} MB" if r["size"] else ""), xalign=0)
+        m.add_css_class("dim-label")
+        box.append(m)
+        if r["desc"]:
+            box.append(Gtk.Label(label=r["desc"], xalign=0, wrap=True))
+        box.append(self._credit_box({"license": r["license"], "license_url": r["license_url"], "author": r["author"],
+                                     "source_url": r["url"], "attribution": commons.attribution(r)}))
+        row = Gtk.Box(spacing=8, homogeneous=True)
+        get = Gtk.Button()
+        get.add_css_class("pill")
+        self._style_commons(get, r)
+        rm = Gtk.Button(label="Uninstall", visible=False)
+        rm.add_css_class("pill")
+        rm.add_css_class("destructive-action")
+
+        def sync():
+            have = commons.installed(r["pageid"])
+            rm.set_visible(bool(have))
+            self._style_commons(get, r)
+
+        def removed(_b):
+            d = commons.installed(r["pageid"])
+            it = next((i for i in self.items if i.dir == d), None)
+            if it:
+                dlg.close()
+                self.uninstall_item(it)
+        get.connect("clicked", lambda b: self._commons_get(b, r, sync))
+        rm.connect("clicked", removed)
+        sync()
+        row.append(get)
+        row.append(rm)
+        box.append(row)
+        tv.set_content(Gtk.ScrolledWindow(child=box, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER))
+        dlg.set_child(tv)
+        dlg.present(self)
 
     def _open_link(self, wid: str):
         """A pasted Workshop link or id: show that wallpaper (in the library when it is already installed)."""
@@ -1010,25 +1191,23 @@ class Window(Adw.ApplicationWindow):
         self.toasts.add_toast(Adw.Toast(title="That link is not a Wallpaper Engine wallpaper, or it was removed"))
         return False
 
-    def _web_error(self, msg):
+    def _web_error(self, msg, name="Workshop"):
         self.w_spin.stop()
-        self.toasts.add_toast(Adw.Toast(title=f"Workshop unavailable: {msg[:80]}"))
+        self.toasts.add_toast(Adw.Toast(title=f"{name} unavailable: {msg[:80]}"))
         return False
 
     def _show_web(self, res):
+        if self._commons:
+            return False
         self.w_spin.stop()
-        child = self.w_flow.get_first_child()
-        while child:
-            nxt = child.get_next_sibling()
-            self.w_flow.remove(child)
-            child = nxt
+        self._clear_web()
         self.w_label.set_text(f"page {self.web_page} of {res.get('pages') or '?'}")
         self.w_prev.set_sensitive(self.web_page > 1)
         self.w_next.set_sensitive(bool(res["pages"]) and self.web_page < res["pages"])
         for r in res["items"]:
             stars = f"{r['stars']:.1f}*" if isinstance(r.get("stars"), (int, float)) and r["stars"] else ""
             size = f"{r['size'] / 1e6:.0f} MB" if r["size"] else ""
-            card = make_card(r["title"], r["preview"], r["type"] or "", "  ".join(x for x in (stars, size) if x))
+            card = make_card(r["title"], r["preview"], r["type"] or "", "  ".join(x for x in (stars, size) if x), source="Wallpaper Engine")
             inner = card.get_last_child()
             btn = Gtk.Button()
             self._style_get(btn, r["id"])
@@ -1039,10 +1218,20 @@ class Window(Adw.ApplicationWindow):
             link.connect("clicked", lambda _b, i=r["id"]: self._share(i))
             row = Gtk.Box(spacing=6)
             row.append(btn)
+            if workshop.installed(r["id"]):
+                rm = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Uninstall: unsubscribe in Steam")
+                rm.add_css_class("flat")
+                rm.connect("clicked", lambda _b, i=r["id"]: self._uninstall_workshop(i))
+                row.append(rm)
             row.append(link)
             inner.append(row)
             self.w_flow.append(card)
         return False
+
+    def _uninstall_workshop(self, wid: str):
+        it = next((i for i in self.items if i.workshop_id == wid), None)
+        if it:
+            self.uninstall_item(it)
 
     def _style_get(self, btn, item_id):
         if workshop.installed(item_id):
@@ -1338,15 +1527,71 @@ class Window(Adw.ApplicationWindow):
                 self.toasts.add_toast(Adw.Toast(title=f"Could not add {f.name}: {e}"))
         self.reload_library()
 
-    def _remove_local(self, it):
+    def _credit_box(self, raw: dict) -> Gtk.Box:
+        """Licence, author and the attribution line (CC BY / BY-SA ask for it), with links."""
+        b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        b.add_css_class("card")
+        b.set_margin_top(0)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_top=10, margin_bottom=10, margin_start=12, margin_end=12)
+        b.append(inner)
+        esc = GLib.markup_escape_text
+        lic = esc(str(raw.get("license") or "unknown"))
+        if raw.get("license_url"):
+            lic = f'<a href="{esc(raw["license_url"])}">{lic}</a>'
+        author = esc(str(raw.get("author") or "unknown"))
+        rows = [f"<b>Licence</b>  {lic}", f"<b>Author</b>  {author}"]
+        if raw.get("source_url"):
+            rows.append(f'<a href="{esc(raw["source_url"])}">Open the file page on Wikimedia Commons</a>')
+        for t in rows:
+            inner.append(Gtk.Label(label=t, use_markup=True, xalign=0, wrap=True))
+        if raw.get("attribution"):
+            a = Gtk.Label(label=str(raw["attribution"]), xalign=0, wrap=True, selectable=True)
+            a.add_css_class("caption")
+            a.add_css_class("dim-label")
+            inner.append(a)
+        return b
+
+    def _active_outputs(self, it) -> list[str]:
+        return [o["name"] for o in monitors.outputs() if self._active_id(o["name"]) == it.id]
+
+    def uninstall_item(self, it: library.Item):
+        """Confirm, stop the wallpaper if it is playing, then delete (or open Steam to unsubscribe)."""
+        p = uninstall.plan(it)
+        if p.action == "none":
+            self.toasts.add_toast(Adw.Toast(title=p.message))
+            return
+        active = self._active_outputs(it)
+        body = p.message + (f"\n\nIt is playing on {', '.join(active)}; that wallpaper will be stopped first." if active else "")
+        dlg = Adw.AlertDialog(heading=p.title, body=body)
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("go", p.button)
+        if p.action == "delete":
+            dlg.set_response_appearance("go", Adw.ResponseAppearance.DESTRUCTIVE)
+        dlg.set_default_response("cancel")
+        dlg.set_close_response("cancel")
+        dlg.connect("response", lambda _d, r: r == "go" and self._do_uninstall(it, active))
+        dlg.present(self)
+
+    def _do_uninstall(self, it, active):
+        for o in active:
+            self.stop_output(o)
         try:
-            importer.remove(it.dir)
+            res = uninstall.run(it)
         except Exception as e:
             self.toasts.add_toast(Adw.Toast(title=str(e)))
             return
         self.split.set_show_sidebar(False)
-        self.reload_library()
-        self.toasts.add_toast(Adw.Toast(title=f"Removed {it.title}"))
+        self.refresh_playing()
+        if res == "deleted":
+            self.reload_library()
+            self.toasts.add_toast(Adw.Toast(title=f"Uninstalled {it.title}"))
+            self._refresh_web()
+        else:
+            self.toasts.add_toast(Adw.Toast(title="Click Unsubscribe on the Workshop page; Steam then removes the files", timeout=8))
+
+    def _refresh_web(self):
+        if self.stack.get_visible_child_name() == "discover" and not self._first_discover:
+            self.web_search(self.web_page)
 
     def _pick_we(self):
         dlg = Gtk.FileDialog(title="Wallpaper Engine config.json")
@@ -1569,6 +1814,9 @@ def main():
         return doctor.main()
     if "--import" in sys.argv:  # --import PATH... [--copy]
         return importer.main(sys.argv[sys.argv.index("--import") + 1:])
+    if "--commons" in sys.argv:  # --commons [QUERY] [--topic NAME] [--get N]
+        from . import commons
+        return commons.main(sys.argv[sys.argv.index("--commons") + 1:])
     if "--import-we" in sys.argv:  # --import-we [config.json] [--dry-run]
         return weimport.main(sys.argv[sys.argv.index("--import-we") + 1:])
     return App().run([sys.argv[0]])

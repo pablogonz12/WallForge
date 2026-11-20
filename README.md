@@ -250,7 +250,24 @@ Wallpapers do not have to come from the Workshop. Click **+** in the header (or 
 - **HTML folder** (or an `index.html`): copied in as a web wallpaper.
 - **Lively `.zip`**: video, GIF, web and picture packages work. Lively app, Unity, Godot, URL and BizHawk wallpapers are refused with a message.
 
-Items live in `~/.local/share/wallforge/library/local-*/` with a normal `project.json`, show up in the grid (filter **Local**), and can be removed from their detail panel. Workshop content is never deleted. A preview is made with `ffmpeg` when it is installed. Only add packages you trust: web wallpapers run as web pages.
+Items live in `~/.local/share/wallforge/library/local-*/` with a normal `project.json`, show up in the grid, and can be uninstalled from their detail panel. Every card carries a source badge (Wallpaper Engine, Lively, Local, Wikimedia) and the Library has a source filter. A preview is made with `ffmpeg` when it is installed. Only add packages you trust: web wallpapers run as web pages.
+
+### Wikimedia Commons
+
+Discover has a source selector: **Wallpaper Engine Workshop** or **Wikimedia Commons**. Commons offers free videos
+(landscape, 720p or more) from categories such as nature, time-lapse, clouds, waterfalls and cities. No account or key
+is needed. Only files under public domain, CC0, CC BY and CC BY-SA licences are listed. The card and the detail page show
+the licence and the author, and **Download** copies the 1080p WebM into your library with the licence, author and a ready
+attribution line (CC BY / BY-SA ask you to credit the author if you share or show it). Search from a terminal with
+`wallforge --commons [QUERY] [--topic Waterfalls] [--get N]`. WallForge identifies itself with a generic User-Agent,
+asks for small pages and honours the API's `maxlag`.
+
+### Uninstalling
+
+**Uninstall** in the library detail panel (and the trash button on installed Discover cards) asks first, stops the wallpaper
+if it is playing, then removes it. Items you added or downloaded from Commons are deleted (a linked video's original file
+is kept). Workshop wallpapers are managed by Steam, so deleting the folder would only make Steam download it again:
+WallForge opens the item's Workshop page and you click **Unsubscribe** there.
 
 ## Command line
 
@@ -262,6 +279,7 @@ Items live in `~/.local/share/wallforge/library/local-*/` with a normal `project
 | `wallforge --restore` | Re-apply the saved wallpapers and exit, for autostart. |
 | `wallforge --doctor` | Check the setup (Wayland, layer-shell, GTK, assets, renderer, decode) and exit; read-only, no display needed, exit code 1 when something is broken. |
 | `wallforge --import-we [FILE] [--dry-run]` | Import Wallpaper Engine's settings. |
+| `wallforge --commons [QUERY] [--topic NAME] [--get N]` | Search Wikimedia Commons videos; `--get N` imports result N. |
 | `wallforge --import PATH... [--copy]` | Add a video, image, HTML folder or Lively `.zip` to the library (see [Other sources](#other-sources)). |
 
 The renderer and the web player can also be run on their own; see [`render/README.md`](render/README.md) for

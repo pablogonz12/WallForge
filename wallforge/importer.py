@@ -92,9 +92,10 @@ def _meta(d: Path, data: dict, preview: str | None) -> dict:
     return data
 
 
-def import_video(path: Path, copy: bool = False) -> Path:
+def import_video(path: Path, copy: bool = False, title: str | None = None, extra: dict | None = None) -> Path:
+    """``title`` and ``extra`` (e.g. source, author, license) are written into project.json."""
     path = path.resolve()
-    d = _new_dir(path.stem)
+    d = _new_dir(title or path.stem)
     try:
         name = "video" + path.suffix.lower()
         if copy:
@@ -102,7 +103,7 @@ def import_video(path: Path, copy: bool = False) -> Path:
         else:
             (d / name).symlink_to(path)
         prev = _thumb(path, d / "preview.jpg")
-        _write_project(d, _meta(d, {"type": "video", "file": name, "title": path.stem, "source": "Local"}, prev))
+        _write_project(d, _meta(d, {"type": "video", "file": name, "title": title or path.stem, "source": "Local", **(extra or {})}, prev))
     except Exception:
         shutil.rmtree(d, ignore_errors=True)
         raise
