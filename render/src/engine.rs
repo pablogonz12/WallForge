@@ -87,6 +87,9 @@ impl Layer {
     }
 }
 
+/// Placeholder texture name for a declared mask that the package does not supply: bound as 1x1 black.
+const BLACK_MASK: &str = "\u{1}black-mask";
+
 struct Pass {
     prog: u32,
     uniforms: Vec<(Uniform, i32)>,
@@ -111,7 +114,7 @@ struct Layer {
 pub struct Engine {
     layers: Vec<Layer>, prog: u32, u_mvp: i32, u_size: i32, u_tint: i32, u_pm: i32, u_flip: i32, u_uvs: i32, u_uvo: i32,
     vao: u32, view: Mat4, pub clear: [f32; 3], scene_wh: (f32, f32),
-    pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32,
+    pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32, black: u32,
     out: (i32, i32), screen: (i32, i32), main_rt: Option<Target>, scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
     t0: std::time::Instant, time_override: Option<f32>, videos: Vec<crate::video::VideoTex>, texts: Vec<crate::text::Live>, parts: crate::particles::Set,
     prov: HashMap<i64, usize>,          // scene object id -> layer index (render target producers)
@@ -179,7 +182,7 @@ impl Engine {
             gl::Disable(gl::DEPTH_TEST); gl::Disable(gl::DITHER); gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
         }
         let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_pm: loc(prog, "pm"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
-            vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
+            vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0, black: 0,
             out, screen: out, main_rt: None, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], texts: vec![], parts: Default::default(), prov: HashMap::new(), frame_state: vec![], frame_tex: vec![],
             audio: None, audio_tried: false, spec: crate::audiocap::Snapshot::ZERO };
         e.rebuild();
@@ -224,6 +227,17 @@ impl Engine {
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32); gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
         } }
         self.white
+    }
+
+    /// 1x1 black: Wallpaper Engine's unpainted mask for an enabled mask property (mask 0 = keep the pixel).
+    fn black_tex(&mut self) -> u32 {
+        if self.black == 0 { unsafe {
+            gl::GenTextures(1, &mut self.black); gl::BindTexture(gl::TEXTURE_2D, self.black);
+            let px = [0u8, 0, 0, 255];
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8 as i32, 1, 1, 0, gl::RGBA, gl::UNSIGNED_BYTE, px.as_ptr() as *const _);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32); gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+        } }
+        self.black
     }
 
     fn note(&mut self, s: String) { eprintln!("wallforge-render: {s}"); self.notes.push(s); }
@@ -358,13 +372,24 @@ impl Engine {
         let mut combos = mat.combos.clone();
         if let Some((_, _, c)) = ov { for (k, v) in c { combos.insert(k.clone(), v.clone()); } }
         let mut present: Vec<usize> = vec![];
+        // Mask properties the material's shader declares behind a combo (blurprecise's ENABLEMASK): when that gate is
+        // on and the pass brings no mask texture, Wallpaper Engine uses its unpainted (black) mask, so the sampler has
+        // to be considered bound — running such a pass unmasked blurs layers WE leaves sharp.
+        let masked: Vec<usize> = {
+            let vfs = &self.vfs;
+            shader::mask_slots(&|n| vfs.read_str(n), &mat.shader).into_iter()
+                .filter(|(_, req)| req.iter().all(|(k, v)| combos.get(k).map(|c| c.to_string() == v.to_string()).unwrap_or(false)))
+                .map(|(i, _)| i).collect()
+        };
         {
             let mut names: std::collections::BTreeMap<usize, bool> = std::collections::BTreeMap::new();
             for (i, t) in mat.textures.iter().enumerate() { names.insert(i, t.is_some()); }
             for (i, t) in ep.textures.iter().enumerate() { if t.is_some() { names.insert(i, true); } }
             if let Some((_, ts, _)) = ov { for (i, x) in ts.iter().enumerate() { if x.is_some() { names.insert(i, true); } } }
+            for i in &masked { names.entry(*i).or_insert(true); }
             for (i, b) in names { if b { present.push(i); } }
         }
+        let black = if masked.is_empty() { 0 } else { self.black_tex() };
         let key = format!("{}|{}|{:?}", mat.shader, Value::Object(combos.clone()), present);
         if !self.shader_cache.contains_key(&key) {
             let vfs = &self.vfs;
@@ -415,10 +440,12 @@ impl Engine {
         } }
         let mut textures = vec![]; let mut uvr: Vec<[f32; 2]> = vec![]; let mut binds = vec![(0usize, "previous".to_string())];
         if let Some(mx) = ep.bind.iter().map(|b| b.1 + 1).max() { if names.len() < mx { names.resize(mx, None); } }
+        for i in &masked { if names.get(*i).map_or(true, |n| n.is_none()) { if names.len() <= *i { names.resize(*i + 1, None); } names[*i] = Some(BLACK_MASK.to_string()); } }
         for (i, n) in names.iter().enumerate() {
             let bound = ep.bind.iter().find(|b| b.1 == i).map(|b| b.0.clone());
             if let Some(b) = bound { binds.retain(|x| x.0 != i); binds.push((i, b)); textures.push(None); uvr.push([1.0, 1.0]); continue; }
             match n {
+                Some(n) if n == BLACK_MASK => { textures.push(Some((black, (1, 1)))); uvr.push([1.0, 1.0]); }
                 Some(n) if n.starts_with("_rt_imageLayerComposite") => {
                     // another layer's rendered output: bound by name at draw time (see Engine::ensure)
                     if rt_layer_id(n).is_none() { return Err(format!("samples render target ({n}) in slot {i}, which is not supported")); }
