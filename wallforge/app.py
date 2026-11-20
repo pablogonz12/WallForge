@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import os
+import platform
 import random
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -394,6 +396,40 @@ class Window(Adw.ApplicationWindow):
         if getattr(self, "_deb", None):
             GLib.source_remove(self._deb)
         self._deb = GLib.timeout_add(900, self._live_apply)
+
+    def _copy_diagnostics(self):
+        """Copy what a bug report needs: versions, system, the selected wallpaper's renderer report and its log."""
+        lines = [f"WallForge {__version__} (commit {updater.current_commit() or 'unknown'})"]
+        try:
+            lines.append(f"Python {sys.version.split()[0]}, {platform.platform()}")
+            lines.append(f"Session: {os.environ.get('XDG_CURRENT_DESKTOP', '?')} / {os.environ.get('XDG_SESSION_TYPE', '?')}")
+        except Exception:
+            pass
+        try:
+            gpu = subprocess.run(["lspci"], capture_output=True, text=True, timeout=3).stdout
+            gpu = [l.split(": ", 1)[-1] for l in gpu.splitlines() if any(k in l.lower() for k in ("vga", "3d controller"))]
+            if gpu:
+                lines.append("GPU: " + "; ".join(gpu))
+        except Exception:
+            pass
+        rend = paths.find_render()
+        lines.append(f"Renderer: {rend or 'not built'} (layer {self.cfg.data.get('engine', {}).get('layer', '?')})")
+        it = self.sel
+        if it:
+            lines.append(f"Wallpaper: {it.id} '{it.title}' kind={it.kind} broken={it.broken or 'no'}")
+            if rend and it.kind in ("scene", "video"):
+                try:
+                    r = subprocess.run([str(rend), "--check", str(it.run_dir)], capture_output=True, text=True, timeout=15)
+                    lines.append("--check: " + (r.stdout.strip().splitlines() or ["(empty)"])[-1])
+                except Exception as e:
+                    lines.append(f"--check failed: {e}")
+            outs = [o["name"] for o in monitors.outputs() if self.cfg.data["outputs"].get(o["name"], {}).get("id") == it.id]
+            for o in outs[:1]:
+                log = engine.log_tail(o, 25)
+                if log:
+                    lines.append(f"--- {o} log (last lines) ---\n{log.strip()}")
+        self.get_clipboard().set("\n".join(lines))
+        self.toasts.add_toast(Adw.Toast(title="Diagnostics copied"))
 
     def _share(self, workshop_id: str):
         """Copy the wallpaper's Steam Workshop page link; anyone can open it, or paste it into Discover here."""
@@ -1201,6 +1237,11 @@ class Window(Adw.ApplicationWindow):
         top_switch(gu, "Check for updates", "check_updates", "At start and every few hours, asks GitHub whether a newer WallForge exists.")
         top_switch(gu, "Install updates automatically", "auto_update", "Git installs only: downloads the new version in the background, "
                    "checks it loads, and asks you to restart. Package installs update through your package manager.")
+        rd = Adw.ActionRow(title="Copy diagnostics", subtitle="Version, system, renderer report and log lines, ready to paste into a bug report.")
+        bd = Gtk.Button(label="Copy", valign=Gtk.Align.CENTER)
+        bd.connect("clicked", lambda _b: self._copy_diagnostics())
+        rd.add_suffix(bd)
+        gu.add(rd)
         ru = Adw.ActionRow(title="Check now", subtitle=f"Version {__version__}, installed as: {updater.kind()}")
         bu = Gtk.Button(label="Check", valign=Gtk.Align.CENTER)
         bu.connect("clicked", lambda _b: self.check_update())

@@ -110,6 +110,9 @@ Items that were removed or made private cannot be looked up.
 
 ## Reporting a wallpaper that renders wrongly
 
+Settings > Updates > **Copy diagnostics** puts the app version, system, GPU, the selected wallpaper's renderer report
+and the last lines of its log on the clipboard, ready to paste into an issue.
+
 Open an issue with:
 
 1. The wallpaper's Workshop link (the share button copies it).
