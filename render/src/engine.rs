@@ -359,6 +359,10 @@ impl Engine {
                 }
                 if let Ok(i) = n.parse::<i32>() { gl::Uniform1i(l, i); return; }
             }
+            if let Some(n) = name.strip_prefix("g_AudioSpectrum") { // no audio capture: idle (all-zero) spectrum
+                let n: usize = n.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(16);
+                let z = vec![0.0f32; n.min(64)]; gl::Uniform1fv(l, z.len() as i32, z.as_ptr()); return;
+            }
             match name {
                 "g_ModelViewProjectionMatrix" | "g_EffectTextureProjectionMatrix" | "g_ViewProjectionMatrix" | "g_ModelMatrix" => {
                     let m = if name == "g_ModelViewProjectionMatrix" { *mvp } else { scene::ident() };
