@@ -186,7 +186,7 @@ On other distributions, install the same pieces from your package manager:
 | Distribution | Packages |
 |---|---|
 | Fedora | `python3-gobject gtk4 libadwaita python3-pillow python3-aiohttp ffmpeg-free rust cargo clang libva-devel mesa-libEGL webkitgtk6.0 gtk4-layer-shell` |
-| Debian 13+ / Ubuntu | `python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-pil python3-aiohttp ffmpeg cargo clang libva-dev libegl1`, plus `libgtk4-layer-shell0 gir1.2-gtk4layershell-1.0` for web wallpapers |
+| Debian 13+ / recent Ubuntu | `python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-pil python3-aiohttp ffmpeg cargo clang libva-dev libegl1`, plus `libgtk4-layer-shell0 gir1.2-gtk4layershell-1.0` for web wallpapers |
 
 Names drift between releases and only the Arch list is exercised in CI, so run `wallforge --doctor` afterwards: it
 names whichever piece is missing instead of making you guess.
