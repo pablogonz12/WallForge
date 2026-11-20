@@ -57,8 +57,8 @@ Also supported:
   a windowed 1024-point FFT feeds `g_AudioSpectrum{16,32,64}{Left,Right}` (and the unsuffixed averages). Capture only
   starts when a loaded shader asks for those uniforms; `--no-audio-processing` turns it off. A scene whose only motion
   comes from audio still redraws when the spectrum changes.
-- `--no-audio-processing` also applies to the video path's audio analysis; it is the switch behind
-  Settings > Effects and power.
+- `--no-audio-processing` is what Settings > Effects and power > "Disable audio capture for visualisers" passes to the
+  renderer.
 
 Not yet: SceneScript, sound objects, puppet animation, parallax,
 mouse interaction, particle trails/ropes/control points. 3D scenes (perspective camera / `.mdl`) print one line and
