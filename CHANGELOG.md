@@ -18,7 +18,7 @@
 
 ### Compatibility
 
-- **Text layers**: point sizes now match the wallpapers' previews, date/time `format` patterns are expanded (strftime,
+- **Text layers**: effect chains (glow, outline, shadow) now run on text, point sizes match the wallpapers' previews, date/time `format` patterns are expanded (strftime,
   `{year}`-style and Cafe-style `dd MMM yyyy`), and a custom font that cannot be found is named in the log instead of
   silently falling back.
 - Effects can now sample **another layer's rendered image** (`_rt_imageLayerComposite_*`), including layers that are
