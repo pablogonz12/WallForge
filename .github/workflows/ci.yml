@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
-      - run: pacman -Syu --noconfirm git rust ffmpeg pkgconf clang make
+      - run: pacman -Syu --noconfirm git rust ffmpeg pkgconf clang make ttf-dejavu
       - uses: actions/checkout@v4
       - name: Tests
         run: cargo test --release --manifest-path render/Cargo.toml
