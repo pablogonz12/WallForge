@@ -2,6 +2,11 @@
 
 ## 0.6.0
 
+### New
+
+- **Wallpaper rotation**: Settings > Playback changes the wallpaper every N minutes, at random or in library order,
+  optionally only through favourites.
+
 ### Performance and battery
 
 - **Render resolution** (Settings > Effects and power): scene wallpapers can be drawn at 25–100% of the screen size

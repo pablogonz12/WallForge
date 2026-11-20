@@ -60,6 +60,10 @@ target/release/wallforge-render --check <wallpaper folder>     # JSON report, no
 - Web wallpapers: `python3 -m wallforge.webplayer --bg <wallpaper folder> --window 960x540 --screenshot /tmp/x.png`
   opens a normal window, saves a PNG and exits.
 - Import: `./wallforge.sh --import-we some-config.json --dry-run` prints what would be imported.
+- Unit tests (settings, migrations, rotation; no display needed): `python3 -m unittest discover -s tests -v`.
+- Lint: `ruff check wallforge tests` (rules in `pyproject.toml`).
+- Both run on every push and pull request; see `.github/workflows/ci.yml`. The renderer job builds in an Arch
+  container with ffmpeg, the same packages the AUR package needs.
 
 ## Style
 
