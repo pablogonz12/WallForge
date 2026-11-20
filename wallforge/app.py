@@ -1461,6 +1461,10 @@ def main():
     if "--restore" in sys.argv:
         print("started", restore(config.Config()))
         return 0
+    if "--doctor" in sys.argv:  # read-only setup check, no display needed
+        from . import doctor
+
+        return doctor.main()
     if "--import-we" in sys.argv:  # --import-we [config.json] [--dry-run]
         return weimport.main(sys.argv[sys.argv.index("--import-we") + 1:])
     return App().run([sys.argv[0]])

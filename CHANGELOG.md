@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- `wallforge --doctor` checks Wayland, GTK, layer-shell, the renderer build, Wallpaper Engine assets, the Workshop
+  library, ffmpeg/VAAPI and WebKit, then prints what to fix. Read-only, works without a display, exits 1 on failures.
+- `tools/bench.sh <workshop-id>` reproduces the performance table: GPU, CPU, RSS and scene texture memory per
+  wallpaper, against an idle baseline.
+- `docs/comparison.md` places WallForge next to other ways of playing Wallpaper Engine content on Linux, including
+  where the others are ahead.
+
+### Documentation
+
+- README: demo animation from the renderer, real screenshots, measured performance with the command that reproduces
+  it, and a five-line install.
+- AUR: the PKGBUILD builds and packages cleanly; `.SRCINFO` is generated for the AUR submission.
+
 ## 0.6.0
 
 ### New

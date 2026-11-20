@@ -1,5 +1,28 @@
 # Troubleshooting
 
+## Start here: `wallforge --doctor`
+
+One command checks the whole setup and prints what to fix:
+
+```
+$ ./wallforge.sh --doctor
+WallForge 0.6.0 on Linux-...
+
+  ok    Python 3.14.10
+  ok    GTK 4.24.1               libadwaita 1.10
+  ok    gtk4-layer-shell         installed
+  ok    session                  niri on wayland
+  ok    config                   v5 at ~/.config/wallforge/config.json
+  ok    renderer                 ~/Projects/WallForge/render/target/release/wallforge-render
+  ok    Wallpaper Engine assets  ~/.local/share/Steam/steamapps/common/wallpaper_engine/assets
+  ok    Workshop library         122 wallpapers
+  ok    video                    /usr/bin/ffmpeg, VAAPI device /dev/dri/renderD128
+  ok    WebKit 6.0               installed
+```
+
+It needs no display and changes nothing, so its output can go straight into an issue. It exits 1 when something is
+broken (a FAIL line) and 0 otherwise.
+
 ## Where the logs are
 
 Each output has its own log, overwritten every time a wallpaper starts on it:

@@ -209,6 +209,7 @@ Workshop wallpapers themselves are downloaded by the Steam client when you subsc
 ./wallforge.sh                         # the app
 ./wallforge.sh --restore               # re-apply the saved wallpapers and exit (for autostart)
 ./wallforge.sh --import-we [FILE] [--dry-run]   # import Wallpaper Engine settings
+./wallforge.sh --doctor                # check the setup (Wayland, assets, renderer, decode) and exit
 ```
 
 The renderer and the web player can be run on their own; see [`render/README.md`](render/README.md).
@@ -226,7 +227,7 @@ Scene wallpapers are the hard part, and some still render differently from Wallp
 [open an issue](https://github.com/pgm1207/WallForge/issues/new/choose) with the wallpaper's Workshop link (the share
 button copies it) and the log, which is at `$XDG_RUNTIME_DIR/wallforge/<output>.log` or behind "View log" in the
 crash toast. Settings > Updates > **Copy diagnostics** puts the version, GPU, renderer report and log lines on the
-clipboard in one click. [docs/troubleshooting.md](docs/troubleshooting.md) covers the common problems.
+clipboard in one click, and `./wallforge.sh --doctor` checks the whole setup from a terminal. [docs/troubleshooting.md](docs/troubleshooting.md) covers the common problems.
 
 ## More documentation
 
