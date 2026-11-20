@@ -362,7 +362,8 @@ impl Engine {
         let world = world_of(&self.scene.objects, i, 0);
         let world = if align == [0.0, 0.0] { world } else { scene::mul(&world, &scene::trs([align[0] * size[0], align[1] * size[1], 0.0], [1.0; 3], 0.0)) };
         let vfs = &self.vfs;
-        let live = crate::text::Live::new(td, &|p| vfs.read(p), px.0.clamp(1, 4096) as u32, px.1.clamp(1, 4096) as u32, (sx * scale[0].abs()).max(1e-3), self.layers.len());
+        let (live, missing) = crate::text::Live::new(td, &|p| vfs.read(p), px.0.clamp(1, 4096) as u32, px.1.clamp(1, 4096) as u32, (sx * scale[0].abs()).max(1e-3), self.layers.len());
+        if let Some(f) = missing { if !self.notes.iter().any(|n| n.contains(&f)) { self.note(format!("text '{name}': font '{f}' not found, using a fallback font")); } }
         let layer = Layer { name, tex: live.tex, size, world, color, alpha, uvs: [1.0, 1.0], frames: vec![], tex_wh: (1.0, 1.0), full: false, blend: Blend::Alpha, passes: vec![], ping: None, named: HashMap::new(), px };
         self.texts.push(live); self.layers.push(layer);
     }
