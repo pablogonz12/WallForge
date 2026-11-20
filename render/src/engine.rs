@@ -746,4 +746,15 @@ mod layout_tests {
             assert!((x1 - 1.0).abs() < 1e-4 && (y1 - 1.0).abs() < 1e-4, "{ow}x{oh}: {x1} {y1}");
         }
     }
+
+    /// Cross-layer sampling names: `_rt_imageLayerComposite_<id>_a` (and the `_b` variant) map to the scene object id.
+    #[test]
+    fn render_target_names() {
+        assert_eq!(rt_layer_id("_rt_imageLayerComposite_42_a"), Some(42));
+        assert_eq!(rt_layer_id("_rt_imageLayerComposite_310_b"), Some(310));
+        assert_eq!(rt_layer_id("_rt_imageLayerComposite_7"), Some(7));
+        assert_eq!(rt_layer_id("_rt_default"), None);
+        assert_eq!(rt_layer_id("g_Texture0"), None);
+        assert_eq!(rt_layer_id("_rt_imageLayerComposite_x_a"), None);
+    }
 }
