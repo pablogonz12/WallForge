@@ -654,6 +654,14 @@ class Window(Adw.ApplicationWindow):
         self.cfg.save()
         self._rotate_step()
 
+    def _rotation_changed(self):
+        app = self.get_application()
+        if app is not None:
+            try:
+                app._sync_hold(self)
+            except Exception:
+                pass
+
     def rotate_now(self):
         """Shortcut: switch to the next wallpaper(s) without waiting for the timer."""
         self._last_rotate = time.time()
@@ -674,6 +682,7 @@ class Window(Adw.ApplicationWindow):
         add("<Control>comma", self.show_settings)
         add("F5", lambda: self.reload_library(toast=True))
         add("Escape", lambda: self.split.set_show_sidebar(False))
+        add("<Control>q", lambda: self.get_application().quit())
         self.add_controller(ctl)
 
     def _on_close(self, *_):
@@ -1123,7 +1132,12 @@ class Window(Adw.ApplicationWindow):
         rot = Adw.SpinRow.new_with_range(0, 1440, 5)
         rot.set_title("Change wallpaper every (minutes, 0 = never)")
         rot.set_value(c.get("rotate_minutes", 0))
-        rot.connect("notify::value", lambda rr, _p: (c.__setitem__("rotate_minutes", int(rr.get_value())), self.cfg.save()))
+        def rot_changed(rr, _p):
+            c["rotate_minutes"] = int(rr.get_value())
+            self.cfg.save()
+            self._rotation_changed()
+        rot.connect("notify::value", rot_changed)
+        rot.set_subtitle("While rotation is on, closing the window keeps WallForge running in the background so it can still change the wallpaper. Ctrl+Q quits completely.")
         g1.add(rot)
         top_switch(g1, "Pick a random wallpaper when it changes", "rotate_shuffle", "Off: walk the library in order.")
         top_switch(g1, "Rotate only through favourites", "rotate_favorites")
@@ -1326,12 +1340,27 @@ class App(Adw.Application):
         self.cfg = config.Config()
 
     def do_activate(self):
-        prov = Gtk.CssProvider()
-        prov.load_from_string(CSS)
-        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        Gtk.Window.set_default_icon_name(APP_ID)
+        if not getattr(self, "_css", False):  # only once: reopening the window must not stack CSS providers
+            prov = Gtk.CssProvider()
+            prov.load_from_string(CSS)
+            Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            Gtk.Window.set_default_icon_name(APP_ID)
+            self._css = True
         win = self.props.active_window or Window(self, self.cfg)
         win.present()
+        self._sync_hold(win)
+
+    def _sync_hold(self, win=None):
+        """Keep the process alive without a window while the rotation timer is on, so it keeps rotating."""
+        cfg = win.cfg if win is not None else self.cfg
+        want = int(cfg.data.get("rotate_minutes") or 0) > 0
+        held = getattr(self, "_held", False)
+        if want and not held:
+            self.hold()
+            self._held = True
+        elif not want and held:
+            self._held = False
+            self.release()
 
 
 def restore(cfg: config.Config) -> int:

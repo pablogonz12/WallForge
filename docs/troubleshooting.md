@@ -76,6 +76,11 @@ battery" does this automatically while discharging.
 Settings > Playback > "Change wallpaper every" is on. Set it to 0 to keep one wallpaper, or turn off "Give each
 screen its own wallpaper" if you want both screens to change together. `Ctrl+Shift+N` changes immediately.
 
+**WallForge stays in the process list after I close its window.**
+That is rotation: while it is on, the window closes but the app keeps running so the timer can still change the
+wallpaper. Set "Change wallpaper every" to 0, or press `Ctrl+Q`, to stop it completely. Launching WallForge again
+brings the window back instead of starting a second copy.
+
 **A wallpaper stopped and the playing bar says "stopped after repeated crashes".**
 The renderer died three times in five minutes and WallForge stopped retrying to avoid a restart loop. The reason is in
 the log (Settings > About > View log); send it with a bug report. Pressing play on the wallpaper starts it again.

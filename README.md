@@ -120,6 +120,9 @@ independently, so two screens get two different wallpapers; with it off they all
 waits while wallpapers are paused by battery saving, never picks a wallpaper that is already showing, and leaves
 screens you stopped by hand stopped. **Ctrl+Shift+N** switches now without waiting for the timer.
 
+While rotation is on, closing the window keeps WallForge running in the background so the timer keeps working; open it
+again from the menu (or your launcher) and it comes straight back. **Ctrl+Q** quits for good.
+
 If a wallpaper stops on its own, WallForge restarts it; after three failures in five minutes it leaves the screen idle
 and says so in the playing bar instead of looping on a crash. The log is under Settings > About > View log.
 
