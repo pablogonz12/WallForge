@@ -159,6 +159,7 @@ pub fn run(args: Args) {
             eprintln!("wallforge-render: surface {}x{} logical -> {}x{} physical", app.size.0, app.size.1, w, h);
             dirty = true;
         }
+        if engine.text_tick() { dirty = true; }
         let now = Instant::now();
         if app.cb_ready && (dirty || (engine.animated && now >= next_due)) {
             engine.tick();
@@ -176,6 +177,7 @@ pub fn run(args: Args) {
             let now = Instant::now();
             let mut deadline: Option<Instant> = None;
             if engine.animated && app.cb_ready { deadline = Some(next_due); }
+            if let Some(d) = engine.text_deadline() { deadline = Some(deadline.map_or(d, |x| x.min(d))); }
             if let Some(d) = args.duration {
                 let e = start + Duration::from_secs_f64(d);
                 deadline = Some(deadline.map_or(e, |x| x.min(e)));

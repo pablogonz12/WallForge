@@ -7,6 +7,8 @@ mod particles;
 mod pkg;
 mod scene;
 mod scene_run;
+mod text;
+mod clock;
 mod scriptvis;
 mod shader;
 mod tex;

@@ -107,7 +107,7 @@ pub struct Engine {
     vao: u32, view: Mat4, pub clear: [f32; 3], scene_wh: (f32, f32),
     pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32,
     out: (i32, i32), scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
-    t0: std::time::Instant, time_override: Option<f32>, videos: Vec<crate::video::VideoTex>, parts: crate::particles::Set,
+    t0: std::time::Instant, time_override: Option<f32>, videos: Vec<crate::video::VideoTex>, texts: Vec<crate::text::Live>, parts: crate::particles::Set,
 }
 
 pub fn view_matrix(sw: f32, sh: f32, ow: i32, oh: i32, scaling: Scaling) -> (Mat4, f32, f32) {
@@ -147,7 +147,7 @@ impl Engine {
         }
         let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
             vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
-            out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], parts: Default::default() };
+            out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], texts: vec![], parts: Default::default() };
         e.rebuild();
         Ok(e)
     }
@@ -170,7 +170,7 @@ impl Engine {
 
     /// (Re)build all GPU resources for the current output size (texture mips / FBO sizes depend on it).
     fn rebuild(&mut self) {
-        self.videos.clear(); self.layers.clear(); self.parts.clear(); self.vram = 0; self.animated = false; self.scene_rt = None;
+        self.videos.clear(); self.texts.clear(); self.layers.clear(); self.parts.clear(); self.vram = 0; self.animated = false; self.scene_rt = None;
         let (v, sx, sy) = view_matrix(self.scene_wh.0, self.scene_wh.1, self.out.0, self.out.1, self.scaling);
         self.view = v;
         let s3tc = tex::has_s3tc();
@@ -180,6 +180,7 @@ impl Engine {
         let n = self.scene.objects.len();
         for i in 0..n {
             if let Kind::Particle { file, ov } = &self.scene.objects[i].kind { let (w, at) = (world_of(&self.scene.objects, i, 0), self.layers.len()); self.parts.add(&self.vfs, file, ov, w, at, s3tc, i as u64); self.animated |= !self.parts.is_empty(); continue; }
+            if let Kind::Text(td) = &self.scene.objects[i].kind { let td = (**td).clone(); self.add_text(i, td, sx, sy); continue; }
             let (name, model, size_o, scale, color, alpha, blend_o) = {
                 let o = &self.scene.objects[i];
                 let Kind::Image { model } = &o.kind else { continue };
@@ -344,6 +345,23 @@ impl Engine {
     }
 
     /// Stage-2 hook: audio spectrum / particle simulation step goes here.
+    /// Text layer for scene object `i` (rasterised with the layer's on-screen pixel size).
+    fn add_text(&mut self, i: usize, td: crate::text::TextDef, sx: f32, sy: f32) {
+        let o = &self.scene.objects[i];
+        let Some(size) = o.size else { return };
+        let (name, scale, color, alpha, align) = (o.name.clone(), o.scale, o.color, o.alpha.clamp(0.0, 1.0), o.align);
+        let px = ((size[0] * scale[0].abs() * sx).ceil().max(1.0) as i32, (size[1] * scale[1].abs() * sy).ceil().max(1.0) as i32);
+        let world = world_of(&self.scene.objects, i, 0);
+        let world = if align == [0.0, 0.0] { world } else { scene::mul(&world, &scene::trs([align[0] * size[0], align[1] * size[1], 0.0], [1.0; 3], 0.0)) };
+        let vfs = &self.vfs;
+        let live = crate::text::Live::new(td, &|p| vfs.read(p), px.0.clamp(1, 4096) as u32, px.1.clamp(1, 4096) as u32, (sx * scale[0].abs()).max(1e-3), self.layers.len());
+        let layer = Layer { name, tex: live.tex, size, world, color, alpha, uvs: [1.0, 1.0], frames: vec![], tex_wh: (1.0, 1.0), full: false, blend: Blend::Alpha, passes: vec![], ping: None, named: HashMap::new(), px };
+        self.texts.push(live); self.layers.push(layer);
+    }
+    /// Refreshes time-driven text (checked at most once a second); true when something changed and a redraw is needed.
+    pub fn text_tick(&mut self) -> bool { let mut c = false; for t in &mut self.texts { if t.refresh() { c = true; } } c }
+    /// When the next time-driven text check is due.
+    pub fn text_deadline(&self) -> Option<std::time::Instant> { self.texts.iter().filter(|t| t.is_dynamic()).map(|t| t.next_check()).min() }
     pub fn tick(&mut self) {
         let fixed = self.time_override.map(|t| t as f64);
         for v in &mut self.videos { v.update(fixed); }

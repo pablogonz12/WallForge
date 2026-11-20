@@ -90,7 +90,7 @@ fn v3(v: Option<Vec<f32>>, d: [f32; 3]) -> [f32; 3] {
 pub struct PassOv { pub constants: Map<String, Value>, pub textures: Vec<Option<String>>, pub combos: Map<String, Value> }
 pub struct EffectRef { pub file: String, pub name: String, pub passes: Vec<PassOv> }
 
-pub enum Kind { Image { model: String }, Particle { file: String, ov: Vec<(String, Vec<f32>)> }, Sound { files: Vec<String> }, Light, Group, Other(String) }
+pub enum Kind { Image { model: String }, Particle { file: String, ov: Vec<(String, Vec<f32>)> }, Sound { files: Vec<String> }, Light, Group, Other(String), Text(Box<crate::text::TextDef>) }
 
 /// WE `alignment`: which point of the layer the origin refers to; returns the quad centre offset in layer sizes.
 pub fn align_of(a: &str) -> [f32; 2] {
@@ -131,6 +131,7 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
         let kind = if let Some(i) = o.get("image").and_then(|v| v.as_str()) { Kind::Image { model: i.to_string() }
             } else if let Some(p) = o.get("particle").and_then(|v| v.as_str()) { Kind::Particle { file: p.to_string(), ov: o.get("instanceoverride").and_then(|v| v.as_object()).map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), props.floats(Some(v))?))).collect()).unwrap_or_default() }
             } else if let Some(s) = o.get("sound").and_then(|v| v.as_array()) { Kind::Sound { files: s.iter().filter_map(|x| x.as_str().map(String::from)).collect() }
+            } else if o.get("text").is_some() && o.get("font").is_some() { match crate::text::parse(o, &|v| props.resolve(v)) { Some(t) => Kind::Text(Box::new(t)), None => Kind::Group }
             } else if o.get("light").is_some() { Kind::Light
             } else if let Some(m) = o.get("model").and_then(|v| v.as_str()) {
                 if m.ends_with(".mdl") || m.ends_with(".json") { fatal.push(format!("3D model object '{name}'")); }
