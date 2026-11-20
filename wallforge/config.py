@@ -37,7 +37,7 @@ DEFAULTS = {
         "render_scale": 100,  # render resolution in percent, 25..100
         "reduce_on_battery": True,  # lower fps and resolution while on battery
         "pause_on_battery": False,  # stop wallpapers (and do not restart them) while on battery
-        "layer": "bottom",  # bottom|background (background pairs with niri place-within-backdrop)
+        "layer": "background",  # background|bottom (background is what niri's blur/xray and backdrop sample)
         "silent": False,
         "volume": 100,
         "preload_next": True,  # keep the next wallpaper loaded on the layer below, so switching is instant

@@ -53,7 +53,7 @@ def build_web_args(cfg, item: library.Item, output: str, overrides: dict | None 
     vals.update(overrides or {})
     fps, _scale = effective(cfg)
     a = [sys.executable, "-m", "wallforge.webplayer", "--output", output, "--bg", str(item.run_dir),
-         "--fps", str(fps), "--layer", e.get("layer", "bottom")]
+         "--fps", str(fps), "--layer", e.get("layer", "background")]
     vol = cfg.volume_for(item.id)
     a += ["--volume", str(vol)] if vol else ["--silent"]
     if not e.get("disable_mouse", True):
@@ -174,7 +174,7 @@ def build_native_args(cfg, item: library.Item, output: str, overrides: dict | No
             run = texpatch.patched_dir(item.run_dir, imgs) or item.run_dir  # None when there is no package to patch
     fps, scale = effective(cfg)
     a = [str(paths.find_render()), "--output", output, "--bg", str(run), "--scaling", scaling,
-         "--fps", str(fps), "--layer", e.get("layer", "bottom")]
+         "--fps", str(fps), "--layer", e.get("layer", "background")]
     if window_mode():
         a.append("--window")
     vol = cfg.volume_for(item.id)
@@ -213,7 +213,7 @@ def build_args(cfg, item: library.Item, output: str, overrides: dict | None = No
     run = texpatch.patched_dir(item.run_dir, imgs) if imgs else None
     a = [str(eng), "--screen-root", output, "--bg", str(run or item.run_dir), "--assets-dir", assets,
          "--scaling", ("fill" if e["scaling"] == "auto" else e["scaling"]), "--clamp", e["clamp"], "--fps", str(e["fps"]),
-         "--layer", e.get("layer", "bottom")]
+         "--layer", e.get("layer", "background")]
     vol = cfg.volume_for(item.id)
     a += ["--volume", str(vol)] if vol else ["--silent"]
     for flag, key in (("--no-audio-processing", "no_audio_processing"), ("--disable-particles", "disable_particles"),
@@ -295,10 +295,10 @@ def find_pids(output: str) -> list[int]:
 def preload(cfg, item: library.Item, output: str) -> bool:
     """Load the wallpaper that will probably be next, on the layer below, so switching to it is one frame.
 
-    It only works from the default "bottom" layer: the spare sits on "background", invisible behind the current
-    wallpaper, and switching is then just stopping the current one. Costs the spare's VRAM until it is used.
+    The spare runs `--hidden` on the same layer as the visible wallpaper: it loads and renders but never presents until
+    promote() signals it, so it is invisible (also to niri's blur, which samples the background layer). Costs the
+    spare's VRAM until it is used.
     """
-    e = cfg.data["engine"]
     # The spare lives on the SAME layer as the visible wallpaper (niri's blur/xray samples only `background`, so the
     # visible one must be there if the user chose it) and is started `--hidden`: it never presents until promoted.
     if window_mode():
