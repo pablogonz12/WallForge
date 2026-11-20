@@ -116,7 +116,7 @@ Settings that trade a little sharpness for a lot less GPU time:
 Settings > Playback > **Change wallpaper every** switches all screens to a new wallpaper every N minutes (0 turns it
 off). *Pick a random wallpaper* chooses at random; with it off, the library order is followed. *Rotate only through
 favourites* keeps the rotation to wallpapers you starred. Rotation waits while wallpapers are paused by battery saving,
-and a wallpaper that is already showing is never picked again immediately.
+never picks a wallpaper that is already showing, and leaves screens you stopped by hand stopped.
 
 If a wallpaper stops on its own, WallForge restarts it; after three failures in five minutes it leaves the screen idle
 and says so in the playing bar instead of looping on a crash. The log is under Settings > About > View log.

@@ -112,6 +112,7 @@ class Window(Adw.ApplicationWindow):
         self._restarts: dict[str, list[float]] = {}  # output -> restart timestamps
         self._started: dict[str, float] = {}  # output -> when we last tried to start it
         self._crashed: set[str] = set()  # outputs given up on after repeated crashes
+        self._stopped: set[str] = set()  # outputs the user stopped by hand (rotation leaves them alone)
         self._battery_paused = False
         self._last_rotate = float(self.cfg.data.get("last_rotate") or 0)
 
@@ -608,7 +609,8 @@ class Window(Adw.ApplicationWindow):
         if now - self._last_rotate < mins * 60:
             return
         outs = [o["name"] for o in (self._mons or monitors.outputs())]
-        if not any(self.cfg.data["outputs"].get(o, {}).get("id") for o in outs):
+        outs = [o for o in outs if self.cfg.data["outputs"].get(o, {}).get("id") and o not in self._stopped]
+        if not outs:
             return
         it = self._next_rotated()
         self._last_rotate = now
@@ -684,6 +686,7 @@ class Window(Adw.ApplicationWindow):
     def _remember(self, output: str, item_id: str):
         """Track what we started on an output so the watchdog can restart it."""
         self._applied[output] = item_id
+        self._stopped.discard(output)
         self._restarts.pop(output, None)
         self._crashed.discard(output)
         self._started[output] = time.time()
@@ -691,6 +694,7 @@ class Window(Adw.ApplicationWindow):
     def _forget(self, output: str):
         """Explicit stop: no restart for this output."""
         self._applied.pop(output, None)
+        self._stopped.add(output)
         self._restarts.pop(output, None)
         self._crashed.discard(output)
         self._started.pop(output, None)
