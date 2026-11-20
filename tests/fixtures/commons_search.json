@@ -1,0 +1,519 @@
+{
+ "batchcomplete": true,
+ "continue": {
+  "gsroffset": 6,
+  "continue": "gsroffset||"
+ },
+ "warnings": {
+  "videoinfo": {
+   "warnings": "Unrecognized values for parameter \"viprop\": duration, thumbnail"
+  }
+ },
+ "query": {
+  "pages": [
+   {
+    "pageid": 8102385,
+    "ns": 6,
+    "title": "File:Bopath Ella.ogv",
+    "index": 5,
+    "imagerepository": "local",
+    "videoinfo": [
+     {
+      "user": "Chamal N",
+      "size": 500210,
+      "width": 320,
+      "height": 240,
+      "duration": 7.198185941043084,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/4f/Bopath_Ella.ogv/250px--Bopath_Ella.ogv.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo",
+      "thumbwidth": 320,
+      "thumbheight": 240,
+      "thumbattribs": [],
+      "url": "https://upload.wikimedia.org/wikipedia/commons/4/4f/Bopath_Ella.ogv?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Bopath_Ella.ogv",
+      "descriptionshorturl": "https://commons.wikimedia.org/wiki/Special:Redirect/page/8102385",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Bopath Ella",
+        "source": "mediawiki-metadata"
+       },
+       "ImageDescription": {
+        "value": "The <a href=\"https://en.wikipedia.org/wiki/Bopath_Ella_Waterfall\" class=\"extiw\" title=\"w:Bopath Ella Waterfall\">Bopath Ella Waterfall</a> in <a href=\"https://en.wikipedia.org/wiki/Ratnapura_District\" class=\"extiw\" title=\"w:Ratnapura District\">Ratnapura District</a>, <a href=\"https://en.wikipedia.org/wiki/Sri_Lanka\" class=\"extiw\" title=\"w:Sri Lanka\">Sri Lanka</a>",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"en\">Own work</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:Chamal_N\" title=\"User:Chamal N\">Chamal N</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY-SA 3.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "AttributionRequired": {
+        "value": "true",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by-sa/3.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "application/ogg",
+      "derivatives": [
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/4/4f/Bopath_Ella.ogv/Bopath_Ella.ogv.240p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "240p.vp9.webm",
+        "width": 320,
+        "height": 240,
+        "bandwidth": 295168
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/4/4f/Bopath_Ella.ogv/Bopath_Ella.ogv.360p.mpeg4.mov",
+        "type": "video/quicktime; codecs=\"mp4v\"",
+        "transcodekey": "360p.mpeg4.mov",
+        "width": 320,
+        "height": 240,
+        "bandwidth": 1146968
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "pageid": 32345793,
+    "ns": 6,
+    "title": "File:Wasserfall der Laussa kurz vor der M\u00fcndung in die Enns.ogv",
+    "index": 6,
+    "imagerepository": "local",
+    "videoinfo": [
+     {
+      "user": "Amada44",
+      "size": 282746485,
+      "width": 1920,
+      "height": 1080,
+      "duration": 57.05705705705706,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/05/Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv/500px--Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo",
+      "thumbwidth": 480,
+      "thumbheight": 270,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/05/Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv/960px--Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo"
+      },
+      "thumbattribs": [],
+      "url": "https://upload.wikimedia.org/wikipedia/commons/0/05/Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv",
+      "descriptionshorturl": "https://commons.wikimedia.org/wiki/Special:Redirect/page/32345793",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Wasserfall der Laussa kurz vor der M\u00fcndung in die Enns",
+        "source": "mediawiki-metadata"
+       },
+       "ImageDescription": {
+        "value": "This media shows the natural monument in Upper Austria  with the ID <b><a rel=\"nofollow\" class=\"external text\" href=\"https://e-gov.ooe.gv.at/ndbinternet/NDBInternetGenisysDetail.jsp?mod=NSB&amp;genisysInventarNr=nd396\">nd396</a></b>.",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"en\">Own work</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:Amada44\" title=\"User:Amada44\">Amada44</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY-SA 3.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "AttributionRequired": {
+        "value": "true",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by-sa/3.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "application/ogg",
+      "derivatives": [
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/0/05/Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv/Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv.240p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "240p.vp9.webm",
+        "width": 426,
+        "height": 240,
+        "bandwidth": 411728
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/0/05/Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv/Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv.360p.mpeg4.mov",
+        "type": "video/quicktime; codecs=\"mp4v\"",
+        "transcodekey": "360p.mpeg4.mov",
+        "width": 640,
+        "height": 360,
+        "bandwidth": 1133696
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/0/05/Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv/Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv.480p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "480p.vp9.webm",
+        "width": 854,
+        "height": 480,
+        "bandwidth": 1372840
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/0/05/Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv/Wasserfall_der_Laussa_kurz_vor_der_M%C3%BCndung_in_die_Enns.ogv.1080p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "1080p.vp9.webm",
+        "width": 1920,
+        "height": 1080,
+        "bandwidth": 5974776
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "pageid": 59037076,
+    "ns": 6,
+    "title": "File:Vettisfossenvideo.webm",
+    "index": 1,
+    "imagerepository": "local",
+    "videoinfo": [
+     {
+      "user": "Kallerna",
+      "size": 23768005,
+      "width": 1080,
+      "height": 1920,
+      "duration": 17.233,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/29/Vettisfossenvideo.webm/500px--Vettisfossenvideo.webm.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo",
+      "thumbwidth": 480,
+      "thumbheight": 853,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/29/Vettisfossenvideo.webm/960px--Vettisfossenvideo.webm.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo"
+      },
+      "thumbattribs": [],
+      "url": "https://upload.wikimedia.org/wikipedia/commons/2/29/Vettisfossenvideo.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Vettisfossenvideo.webm",
+      "descriptionshorturl": "https://commons.wikimedia.org/wiki/Special:Redirect/page/59037076",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Vettisfossenvideo",
+        "source": "mediawiki-metadata"
+       },
+       "ImageDescription": {
+        "value": "<a href=\"https://en.wikipedia.org/wiki/Vettisfossen\" class=\"extiw\" title=\"w:Vettisfossen\">Vettisfossen</a> waterfall in <a href=\"https://en.wikipedia.org/wiki/Utladalen\" class=\"extiw\" title=\"w:Utladalen\">Utladalen</a>, Norway.",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"en\">Own work</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:Kallerna\" title=\"User:Kallerna\">kallerna</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY-SA 3.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "AttributionRequired": {
+        "value": "true",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by-sa/3.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "video/webm",
+      "derivatives": [
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/2/29/Vettisfossenvideo.webm/Vettisfossenvideo.webm.240p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "240p.vp9.webm",
+        "width": 136,
+        "height": 240,
+        "bandwidth": 272352
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/2/29/Vettisfossenvideo.webm/Vettisfossenvideo.webm.360p.mpeg4.mov",
+        "type": "video/quicktime; codecs=\"mp4v\"",
+        "transcodekey": "360p.mpeg4.mov",
+        "width": 202,
+        "height": 360,
+        "bandwidth": 1133584
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/2/29/Vettisfossenvideo.webm/Vettisfossenvideo.webm.480p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "480p.vp9.webm",
+        "width": 270,
+        "height": 480,
+        "bandwidth": 829384
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/2/29/Vettisfossenvideo.webm/Vettisfossenvideo.webm.1080p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "1080p.vp9.webm",
+        "width": 608,
+        "height": 1080,
+        "bandwidth": 3873864
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "pageid": 146233357,
+    "ns": 6,
+    "title": "File:Karkloof Falls (53460015297).webm",
+    "index": 3,
+    "imagerepository": "local",
+    "videoinfo": [
+     {
+      "user": "Sikander",
+      "size": 3462506,
+      "width": 1920,
+      "height": 1080,
+      "duration": 4.244,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/df/Karkloof_Falls_%2853460015297%29.webm/500px--Karkloof_Falls_%2853460015297%29.webm.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo",
+      "thumbwidth": 480,
+      "thumbheight": 270,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/df/Karkloof_Falls_%2853460015297%29.webm/960px--Karkloof_Falls_%2853460015297%29.webm.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo"
+      },
+      "thumbattribs": [],
+      "url": "https://upload.wikimedia.org/wikipedia/commons/d/df/Karkloof_Falls_%2853460015297%29.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Karkloof_Falls_(53460015297).webm",
+      "descriptionshorturl": "https://commons.wikimedia.org/wiki/Special:Redirect/page/146233357",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Karkloof Falls (53460015297)",
+        "source": "mediawiki-metadata"
+       },
+       "ImageDescription": {
+        "value": "Karkloof Falls",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<a rel=\"nofollow\" class=\"external free\" href=\"https://www.flickr.com/photos/flowcomm/53460015297/\">https://www.flickr.com/photos/flowcomm/53460015297/</a>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a rel=\"nofollow\" class=\"external free\" href=\"https://www.flickr.com/photos/flowcomm/\">https://www.flickr.com/photos/flowcomm/</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY 2.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "AttributionRequired": {
+        "value": "true",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by/2.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "video/webm",
+      "derivatives": [
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/d/df/Karkloof_Falls_%2853460015297%29.webm/Karkloof_Falls_%2853460015297%29.webm.240p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "240p.vp9.webm",
+        "width": 426,
+        "height": 240,
+        "bandwidth": 348192
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/d/df/Karkloof_Falls_%2853460015297%29.webm/Karkloof_Falls_%2853460015297%29.webm.480p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "480p.vp9.webm",
+        "width": 854,
+        "height": 480,
+        "bandwidth": 944976
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/d/df/Karkloof_Falls_%2853460015297%29.webm/Karkloof_Falls_%2853460015297%29.webm.1080p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "1080p.vp9.webm",
+        "width": 1920,
+        "height": 1080,
+        "bandwidth": 3543952
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "pageid": 149627703,
+    "ns": 6,
+    "title": "File:Diving V\u00f8ringsfossen waterfall by drone.webm",
+    "index": 2,
+    "imagerepository": "local",
+    "videoinfo": [
+     {
+      "user": "Prototyperspective",
+      "size": 62617302,
+      "width": 2560,
+      "height": 1440,
+      "duration": 38.961,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1c/Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm/500px--Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo",
+      "thumbwidth": 480,
+      "thumbheight": 270,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1c/Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm/960px--Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo"
+      },
+      "thumbattribs": [],
+      "url": "https://upload.wikimedia.org/wikipedia/commons/1/1c/Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm",
+      "descriptionshorturl": "https://commons.wikimedia.org/wiki/Special:Redirect/page/149627703",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Diving V\u00f8ringsfossen waterfall by drone",
+        "source": "mediawiki-metadata"
+       },
+       "ImageDescription": {
+        "value": "Diving the V\u00f8ringsfossen waterfall with my iFlight Bumblebee V2 with a Gopro7 naked attached.",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<bdi lang=\"en\" dir=\"ltr\"><a href=\"//commons.wikimedia.org/wiki/Commons:YouTube_files\" title=\"Commons:YouTube files\">YouTube</a>: <a rel=\"nofollow\" class=\"external text\" href=\"https://www.youtube.com/watch?v=JMaGvJ3WEI8\"><bdi lang=\"\">Diving V\u00f8ringsfossen waterfall with iFlight Bumblebee V2 and a GoPro7 naked.</bdi></a> \u2013 View/save archived versions on <a rel=\"nofollow\" class=\"external text\" href=\"https://web.archive.org/web/*/https://www.youtube.com/watch?v=JMaGvJ3WEI8\">archive.org</a></bdi>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a rel=\"nofollow\" class=\"external text\" href=\"https://www.youtube.com/@MariusArnesen\">Marius Arnesen</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY 3.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "AttributionRequired": {
+        "value": "true",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by/3.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "video/webm",
+      "derivatives": [
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/1/1c/Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm/Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm.240p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "240p.vp9.webm",
+        "width": 426,
+        "height": 240,
+        "bandwidth": 412104
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/1/1c/Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm/Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm.360p.mpeg4.mov",
+        "type": "video/quicktime; codecs=\"mp4v\"",
+        "transcodekey": "360p.mpeg4.mov",
+        "width": 640,
+        "height": 360,
+        "bandwidth": 1464688
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/1/1c/Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm/Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm.480p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "480p.vp9.webm",
+        "width": 854,
+        "height": 480,
+        "bandwidth": 1332216
+       },
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/transcoded/1/1c/Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm/Diving_V%C3%B8ringsfossen_waterfall_by_drone.webm.1080p.vp9.webm",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "transcodekey": "1080p.vp9.webm",
+        "width": 1920,
+        "height": 1080,
+        "bandwidth": 5277936
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "pageid": 188211159,
+    "ns": 6,
+    "title": "File:Front view video of Kawaida Waterfall, Cianda, Kiambu County.webm",
+    "index": 4,
+    "imagerepository": "local",
+    "videoinfo": [
+     {
+      "user": "Lebu Ayiga",
+      "size": 3520704,
+      "width": 480,
+      "height": 848,
+      "duration": 11.246,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/28/Front_view_video_of_Kawaida_Waterfall%2C_Cianda%2C_Kiambu_County.webm/330px--Front_view_video_of_Kawaida_Waterfall%2C_Cianda%2C_Kiambu_County.webm.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo",
+      "thumbwidth": 480,
+      "thumbheight": 848,
+      "thumbattribs": [],
+      "url": "https://upload.wikimedia.org/wikipedia/commons/2/28/Front_view_video_of_Kawaida_Waterfall%2C_Cianda%2C_Kiambu_County.webm?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Front_view_video_of_Kawaida_Waterfall,_Cianda,_Kiambu_County.webm",
+      "descriptionshorturl": "https://commons.wikimedia.org/wiki/Special:Redirect/page/188211159",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Front view video of Kawaida Waterfall, Cianda, Kiambu County",
+        "source": "mediawiki-metadata"
+       },
+       "ImageDescription": {
+        "value": "A short video clip providing a direct front view of the Kawaida Waterfall in Cianda, Kiambu County, Kenya. The video shows the water rushing over the rocky ledge and splashing onto the rocks and into the brown river pool below, with lush green vegetation on either side.",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"en\">Own work</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:Lebu_Ayiga\" title=\"User:Lebu Ayiga\">Lebu Ayiga</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY 4.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "AttributionRequired": {
+        "value": "true",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by/4.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "video/webm",
+      "derivatives": [
+       {
+        "src": "https://upload.wikimedia.org/wikipedia/commons/2/28/Front_view_video_of_Kawaida_Waterfall%2C_Cianda%2C_Kiambu_County.webm?utm_source=commons.wikimedia.org&utm_campaign=api&utm_content=original",
+        "type": "video/webm; codecs=\"vp9, opus\"",
+        "width": 480,
+        "height": 848,
+        "bandwidth": 2504502
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

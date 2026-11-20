@@ -10,6 +10,13 @@
   Tested on GNOME Shell 51 (video wallpapers); web wallpapers are not supported there yet.
 - Monitors are discovered through Mutter on GNOME, so the connector names match.
 - KDE Plasma 6.7+ is documented as supported (tested on KWin 6.8).
+- **Discover sources**: a selector for Wallpaper Engine Workshop or **Wikimedia Commons** (free videos, public
+  domain / CC0 / CC BY / CC BY-SA only, with licence and author on the card and detail page, and an attribution line
+  saved in the project). `wallforge --commons` searches from the terminal.
+- **Source badges** on every Discover and Library card (Wallpaper Engine, Lively, Local, Wikimedia), and a source
+  filter in the Library.
+- **Uninstall** for any installed wallpaper, with a confirmation, stopping it first if it is playing. Workshop items
+  open their Steam page to unsubscribe, since deleting the folder would just be re-downloaded.
 
 ### Fixed
 
