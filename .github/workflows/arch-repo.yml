@@ -72,8 +72,10 @@ jobs:
           # keep a short history of packages; the database only needs the newest of each
           ls -1t wallforge-*.pkg.tar.zst | tail -n +4 | xargs -r rm -f
           rm -f *.old  # repo-add keeps a backup of the previous database
-          repo-add --nocolor --remove --verify wallforge.db.tar.zst wallforge-*.pkg.tar.zst 2>/dev/null ||
-            repo-add --nocolor --remove wallforge.db.tar.zst wallforge-*.pkg.tar.zst
+          # rebuild the database from the packages that are actually there, so entries for deleted
+          # packages (old versions, debug packages) disappear instead of pointing at missing files
+          rm -f wallforge.db* wallforge.files*
+          repo-add --nocolor wallforge.db.tar.zst wallforge-*.pkg.tar.zst
           cd /tmp/pages
           git add -A
           git -c user.name="WallForge CI" -c user.email="noreply@github.com" commit -q -m "arch: $TAG"
