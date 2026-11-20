@@ -1,46 +1,99 @@
 <p align="center"><img src="assets/logo-banner.png" alt="WallForge" width="720"></p>
 
-# WallForge
+<h3 align="center">Your Wallpaper Engine library, running natively on Wayland.<br>One small Rust renderer. No Wine, no second engine.</h3>
 
-### Your Wallpaper Engine library, running natively on Linux. One small Rust renderer, no Windows, no Wine.
+<p align="center">
+  <a href="https://github.com/pgm1207/WallForge/actions/workflows/ci.yml"><img src="https://github.com/pgm1207/WallForge/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/pgm1207/WallForge/releases/latest"><img src="https://img.shields.io/github/v/release/pgm1207/WallForge?color=blue" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
+  <img src="https://img.shields.io/badge/Wayland-layer--shell-6e56cf" alt="Wayland layer-shell">
+</p>
 
-[![CI](https://github.com/pgm1207/WallForge/actions/workflows/ci.yml/badge.svg)](https://github.com/pgm1207/WallForge/actions/workflows/ci.yml)
+<p align="center"><img src="assets/demo.gif" alt="A scene wallpaper with a fluid-simulation effect, rendered live by WallForge" width="760"></p>
 
-WallForge is a GTK4 / libadwaita app and a small GPU renderer (`wallforge-render`) that plays the
-[Wallpaper Engine](https://store.steampowered.com/app/431960/) wallpapers you already own on any Wayland desktop
-with layer-shell support (niri, Hyprland, Sway, ...).
+<p align="center"><sub>Recorded from the renderer: a Wallpaper Engine scene with a multi-pass fluid simulation, no post-processing.</sub></p>
+
+**WallForge** is a GTK4 / libadwaita app *and* the renderer behind it. It plays the
+[Wallpaper Engine](https://store.steampowered.com/app/431960/) wallpapers you already own on any Wayland desktop with
+layer-shell support — niri, Hyprland, Sway, river — and it manages them: search, per-wallpaper settings, audio,
+rotation, palette sync.
+
+```bash
+# Arch / CachyOS
+sudo pacman -S python-gobject gtk4 libadwaita python-pillow python-aiohttp ffmpeg libva rust clang \
+               webkitgtk-6.0 gtk4-layer-shell
+git clone https://github.com/pgm1207/WallForge && cd WallForge && ./install.sh && ./wallforge.sh
+```
+
+You need to own Wallpaper Engine on Steam (for the Workshop library and its shared assets); WallForge never ships or
+redistributes its files.
+
+## Why WallForge
 
 | | |
 |---|---|
-| **Self-contained** | Its own renderer plays video and scene wallpapers; web wallpapers run in WebKit. No other engine is needed. |
-| **Light on the GPU** | VAAPI hardware decode, zero-copy import, compressed textures kept compressed, pauses when hidden. A 1080p video wallpaper takes about 93 MiB of VRAM. |
-| **Looks right by default** | Auto fit fills the screen (ultrawide art is cropped) and keeps portrait art whole. |
-| **Brings your setup along** | Imports your settings from Wallpaper Engine's own `config.json`. |
-| **Easy to share** | One click copies a wallpaper's Steam Workshop link; paste a link to open that wallpaper. |
-| **Your palette follows** | Noctalia, matugen, wallust, pywal or your own command pick up each wallpaper's colours. |
+| **One app, not a pile** | Library, settings, Discover, share links and the renderer in a single GTK4 window. Nothing else to install or configure. |
+| **Light by design** | One small Rust process per screen. Still scenes are drawn once and then sleep. A 4K video wallpaper costs about 2% of one CPU core. |
+| **Looks right by default** | Auto fit fills the screen (ultrawide art is cropped) and keeps portrait art whole. No stretched wallpapers. |
+| **Brings your setup along** | Imports your Wallpaper Engine `config.json`: per-wallpaper properties, volumes, frame rate limit, fullscreen rule. |
+| **Plays the hard ones** | Multi-pass effects, layer render targets, particles, embedded video, text with glow/outline, audio-reactive visualisers. |
+| **Fits your desktop** | Palette sync with Noctalia, matugen, wallust or pywal; per-monitor wallpapers; rotation; restore at login; battery saving. |
 
-## Contents
+## What it plays
 
-- [What plays](#what-plays)
-- [Features](#features)
-- [Install](#install)
-- [Share a wallpaper](#share-a-wallpaper)
-- [Import your Wallpaper Engine settings](#import-your-wallpaper-engine-settings)
-- [Wallpaper Engine's assets](#wallpaper-engines-assets)
-- [Command line](#command-line)
-- [Updates](#updates)
-- [When a wallpaper looks wrong](#when-a-wallpaper-looks-wrong)
-- [More documentation](#more-documentation)
-
-## What plays
+Every scene wallpaper in our test library (77 installed Workshop scenes) starts with nothing skipped, except one 3D
+scene, which WallForge detects and refuses instead of showing a black screen. The full matrix, including what is still
+approximate, is in [docs/compatibility.md](docs/compatibility.md).
 
 | Wallpaper type | Status |
 |---|---|
-| Video | Works: hardware decode, audio, gapless loop, volume and mute. |
-| Scene (2D) | Works for most wallpapers: layers, multi-pass effects, particle systems, embedded video layers, text layers, your property edits. See [compatibility](docs/compatibility.md) for what is still missing. |
-| Web | Works, in WebKit, with the wallpaper's properties. Needs `webkitgtk-6.0` and `gtk4-layer-shell`. Audio visualisers get silence for now. |
-| 3D scenes | Not supported. WallForge tells you before you apply one. |
-| Application | Windows programs, not supported on Linux. |
+| Video | Hardware decode (VAAPI, zero-copy DMA-BUF), audio, gapless loop, volume and mute. |
+| Scene (2D) | Layers, multi-pass effects, render-target sampling, particles, embedded video, text layers, property edits. SceneScript is not executed. |
+| Web | WebKit on the wallpaper layer, with the wallpaper's properties. |
+| 3D scenes | Not supported; detected before you apply one. |
+
+## Screenshots
+
+<img src="assets/screenshot-library.jpg" alt="The WallForge library with cover art for every subscribed wallpaper" width="100%">
+
+<img src="assets/screenshot-settings.jpg" alt="Settings: playback, rotation, render resolution, battery saving, effects" width="100%">
+
+## Performance
+
+Measured on a Ryzen 9 9900X with a Radeon RX 9070 (RADV), 3840×2160 output, 30 fps, one wallpaper:
+
+| Wallpaper | CPU (one core) | GPU | Renderer memory |
+|---|---|---|---|
+| 4K video, hardware decoded | ~2% | ~6% (idle desktop is ~5%) | 137 MB |
+| Static scene | ~1% | idle: drawn once, then sleeps | 108 MB |
+| Fluid-simulation scene (19 effect passes) | ~4% | ~20% | 297 MB |
+
+Settings that trade a little sharpness for a lot less GPU time:
+
+- **Render resolution (%)**: scene wallpapers are drawn at 25–100% of the screen size and upscaled with linear
+  filtering. Videos and web wallpapers always play at native resolution. 100% is the default; 75% is a good
+  compromise on a laptop or a shared GPU, 50% makes a heavy scene comfortable on an integrated GPU.
+- **Frame rate limit**: 30 fps by default (5–240). 24 is enough for most wallpapers and nearly halves the work of 60.
+- **Disable particles**, **Disable parallax**, **Disable mouse interaction**: turn off the effects that cost the most
+  and that you are least likely to notice under your windows.
+- **Reduce frame rate and resolution on battery**: while discharging, the limit drops to 30 fps and the render scale to
+  75% at most, without touching your settings.
+- **Pause wallpapers on battery**: stops every wallpaper while discharging and brings them back when you plug in.
+
+If a wallpaper stops on its own, WallForge restarts it; after three failures in five minutes it leaves the screen idle
+and says so in the playing bar instead of looping on a crash. The log is under Settings > About > View log.
+
+## Rotation
+
+Settings > Playback > **Change wallpaper every** switches to a new wallpaper every N minutes (0 turns it off).
+*Pick a random wallpaper* chooses at random; with it off, the library order is followed. *Rotate only through
+favourites* keeps the rotation to wallpapers you starred. *Give each screen its own wallpaper* rotates each monitor
+independently, so two screens get two different wallpapers; with it off they all change to the same one. Rotation
+waits while wallpapers are paused by battery saving, never picks a wallpaper that is already showing, and leaves
+screens you stopped by hand stopped. **Ctrl+Shift+N** switches now without waiting for the timer.
+
+While rotation is on, closing the window keeps WallForge running in the background so the timer keeps working; open it
+again from the menu (or your launcher) and it comes straight back. **Ctrl+Q** quits for good.
 
 ## Features
 
@@ -55,15 +108,28 @@ with layer-shell support (niri, Hyprland, Sway, ...).
 - **Auto scaling** by default; fill, fit and stretch are in Settings.
 - **Palette sync** with Noctalia, matugen, wallust, pywal or a custom command.
 - **Restore at login**: `wallforge.sh --restore` re-applies your saved wallpapers (toggle in Settings).
-- **Rotation**: change the wallpaper on a timer, at random or in library order, optionally only through favourites.
 - **Audio-reactive wallpapers** hear what you play: visualisers and spectrum effects are driven by the system's audio
   output, with no microphone involved, and stay idle when no wallpaper asks for them.
-- **Low cost by default**: one small renderer per screen, still scenes drawn once and then frozen, a render
-  resolution setting, and battery saving that lowers the frame rate (or pauses everything) when you unplug.
 - **Safe**: a crash shows a toast with a "View log" button, a dead renderer is restarted automatically, broken files
   are caught by a watchdog, and unsupported 3D scenes are detected before you apply them.
 - **Sensible defaults**: anime and mature content are hidden until you switch them on in Settings.
 - Keyboard: `Ctrl+F` search, `Ctrl+R` random, `Ctrl+,` settings, `F5` rescan.
+
+## Contents
+
+- [What plays](#what-plays)
+- [Screenshots](#screenshots)
+- [Performance](#performance)
+- [Rotation](#rotation)
+- [Features](#features)
+- [Install](#install)
+- [Share a wallpaper](#share-a-wallpaper)
+- [Import your Wallpaper Engine settings](#import-your-wallpaper-engine-settings)
+- [Wallpaper Engine's assets](#wallpaper-engines-assets)
+- [Command line](#command-line)
+- [Updates](#updates)
+- [When a wallpaper looks wrong](#when-a-wallpaper-looks-wrong)
+- [More documentation](#more-documentation)
 
 ## Install
 
@@ -86,7 +152,7 @@ sudo pacman -S python-gobject gtk4 libadwaita python-pillow python-aiohttp ffmpe
 
 ```bash
 git clone https://github.com/pgm1207/WallForge
-cd wallforge
+cd WallForge
 ./install.sh        # builds the renderer (about a minute), adds a menu entry and icon
 ./wallforge.sh
 ```
@@ -95,38 +161,6 @@ cd wallforge
 
 A `wallforge-git` PKGBUILD is in [`packaging/aur/`](packaging/aur). It is not published on the AUR yet; build it
 with `makepkg -si` from that folder.
-
-## Performance and battery
-
-WallForge renders each wallpaper in one small process per screen and keeps still scenes frozen: a scene whose effects do
-not depend on time is drawn once and then sleeps until something changes.
-
-Settings that trade a little sharpness for a lot less GPU time:
-
-- **Render resolution (%)**: scene wallpapers are drawn at 25–100% of the screen size and upscaled with linear
-  filtering. Videos and web wallpapers always play at native resolution. 100% is the default; 75% is a good
-  compromise on a laptop or a shared GPU, 50% makes a heavy scene comfortable on an integrated GPU.
-- **Frame rate limit**: 30 fps by default (5–240). 24 is enough for most wallpapers and nearly halves the work of 60.
-- **Disable particles**, **Disable parallax**, **Disable mouse interaction**: turn off the effects that cost the most
-  and that you are least likely to notice under your windows.
-- **Reduce frame rate and resolution on battery**: while discharging, the limit drops to 30 fps and the render scale to
-  75% at most, without touching your settings.
-- **Pause wallpapers on battery**: stops every wallpaper while discharging and brings them back when you plug in.
-
-### Rotation
-
-Settings > Playback > **Change wallpaper every** switches to a new wallpaper every N minutes (0 turns it off).
-*Pick a random wallpaper* chooses at random; with it off, the library order is followed. *Rotate only through
-favourites* keeps the rotation to wallpapers you starred. *Give each screen its own wallpaper* rotates each monitor
-independently, so two screens get two different wallpapers; with it off they all change to the same one. Rotation
-waits while wallpapers are paused by battery saving, never picks a wallpaper that is already showing, and leaves
-screens you stopped by hand stopped. **Ctrl+Shift+N** switches now without waiting for the timer.
-
-While rotation is on, closing the window keeps WallForge running in the background so the timer keeps working; open it
-again from the menu (or your launcher) and it comes straight back. **Ctrl+Q** quits for good.
-
-If a wallpaper stops on its own, WallForge restarts it; after three failures in five minutes it leaves the screen idle
-and says so in the playing bar instead of looping on a crash. The log is under Settings > About > View log.
 
 ## Share a wallpaper
 
@@ -189,7 +223,8 @@ you and leaves the update to your package manager.
 Scene wallpapers are the hard part, and some still render differently from Wallpaper Engine. Please
 [open an issue](https://github.com/pgm1207/WallForge/issues/new/choose) with the wallpaper's Workshop link (the share
 button copies it) and the log, which is at `$XDG_RUNTIME_DIR/wallforge/<output>.log` or behind "View log" in the
-crash toast. [docs/troubleshooting.md](docs/troubleshooting.md) covers the common problems.
+crash toast. Settings > Updates > **Copy diagnostics** puts the version, GPU, renderer report and log lines on the
+clipboard in one click. [docs/troubleshooting.md](docs/troubleshooting.md) covers the common problems.
 
 ## More documentation
 

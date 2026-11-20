@@ -1,6 +1,7 @@
 # Maintainer: pgm1207 <pgm1207@users.noreply.github.com>
 pkgname=wallforge-git
 _pkgname=wallforge
+_srcname=WallForge  # directory the git source is cloned into
 pkgver=r0.0000000
 pkgrel=1
 pkgdesc='Wallpaper Engine wallpapers on Wayland: native renderer for video, scene and web wallpapers, library, Workshop browser'
@@ -22,17 +23,17 @@ source=("git+$url.git")
 sha256sums=('SKIP')
 
 pkgver() {
-  cd "$_pkgname"
+  cd "$_srcname"
   printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
-  cd "$_pkgname/render"
+  cd "$_srcname/render"
   cargo build --release --locked
 }
 
 package() {
-  cd "$_pkgname"
+  cd "$_srcname"
   install -d "$pkgdir/usr/lib/$_pkgname"
   cp -r wallforge "$pkgdir/usr/lib/$_pkgname/"
   find "$pkgdir/usr/lib/$_pkgname" -name __pycache__ -prune -exec rm -rf {} +
