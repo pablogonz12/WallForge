@@ -55,8 +55,25 @@ impl Props {
                     _ => default,
                 }
             }
-            _ => if o.contains_key("value") { default } else { v.clone() },
+            _ => if o.contains_key("value") { self.script_axes(o, default) } else { v.clone() },
         }
+    }
+    /// Scripts of the form `value.y = scriptProperties.posY;` only overwrite vector components with script properties: honour those
+    /// (anything more elaborate keeps the stored default, scripts are not executed).
+    fn script_axes(&self, o: &serde_json::Map<String, Value>, default: Value) -> Value {
+        let (Some(Value::String(src)), Some(Value::Object(sp)), Some(f)) = (o.get("script"), o.get("scriptproperties"), floats(&default)) else { return default };
+        if f.len() < 2 { return default; }
+        let mut f = f; let mut hit = false;
+        for line in src.lines() {
+            let l = line.trim().trim_end_matches(';').replace(' ', "");
+            let Some(r) = l.strip_prefix("value.") else { continue };
+            let Some((ax, rhs)) = r.split_once('=') else { continue };
+            let Some(name) = rhs.strip_prefix("scriptProperties.") else { continue };
+            let i = match ax { "x" => 0, "y" => 1, "z" => 2, _ => continue };
+            if i >= f.len() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') { continue; }
+            if let Some(v) = sp.get(name).and_then(|v| floats(&self.resolve(v))).and_then(|v| v.first().copied()) { f[i] = v; hit = true; }
+        }
+        if hit { Value::String(f.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")) } else { default }
     }
     pub fn floats(&self, v: Option<&Value>) -> Option<Vec<f32>> { floats(&self.resolve(v?)) }
     /// Like `boolean`, but honours the common `applyUserProperties` visibility script.
@@ -69,6 +86,16 @@ impl Props {
         match v.map(|x| self.resolve(x)) {
             Some(Value::Bool(b)) => b, Some(Value::Number(n)) => n.as_f64().unwrap_or(0.0) != 0.0,
             Some(Value::String(s)) => s == "true" || s == "1", _ => d }
+    }
+}
+
+/// ids of invisible objects plus all their descendants (an invisible parent hides its children; children may precede parents in the file)
+fn hidden_ids(objs: &[Value], props: &Props) -> std::collections::HashSet<i64> {
+    let mut h: std::collections::HashSet<i64> = objs.iter().filter(|o| !props.boolean(o.get("visible"), true)).filter_map(|o| o.get("id").and_then(|v| v.as_i64())).collect();
+    loop {
+        let n = h.len();
+        for o in objs { if let (Some(id), Some(p)) = (o.get("id").and_then(|v| v.as_i64()), o.get("parent").and_then(|v| v.as_i64())) { if h.contains(&p) { h.insert(id); } } }
+        if h.len() == n { break h; }
     }
 }
 
@@ -124,10 +151,11 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
     };
     let clear = v3(props.floats(g.get("clearcolor")), [0.0, 0.0, 0.0]);
     let mut objects = vec![];
+    let hidden = hidden_ids(j.get("objects").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]), &props);
     for o in j.get("objects").and_then(|v| v.as_array()).ok_or("scene.json: no objects")? {
         let name = o.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if !props.visible(o.get("visible")) { continue; }
         let id = o.get("id").and_then(|v| v.as_i64()).unwrap_or(-1);
+        if hidden.contains(&id) { continue; }
         let kind = if let Some(i) = o.get("image").and_then(|v| v.as_str()) { Kind::Image { model: i.to_string() }
             } else if let Some(p) = o.get("particle").and_then(|v| v.as_str()) { Kind::Particle { file: p.to_string(), ov: o.get("instanceoverride").and_then(|v| v.as_object()).map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), props.floats(Some(v))?))).collect()).unwrap_or_default() }
             } else if let Some(s) = o.get("sound").and_then(|v| v.as_array()) { Kind::Sound { files: s.iter().filter_map(|x| x.as_str().map(String::from)).collect() }
@@ -164,7 +192,7 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
             color: v3(props.floats(o.get("color")), [1.0; 3]),
             parent: o.get("parent").and_then(|v| v.as_i64()),
             effects,
-            blend: o.get("colorBlendMode").and_then(|v| v.as_str()).map(String::from),
+            blend: o.get("colorBlendMode").and_then(|v| v.as_i64().map(|n| n as i32).or_else(|| v.as_str().and_then(|s| s.parse().ok()))).and_then(|n| match n { 2 => Some("multiply"), 7 => Some("screen"), 9 | 31 => Some("additive"), _ => None }).map(String::from),
             align: align_of(o.get("alignment").and_then(|v| v.as_str()).unwrap_or("center")),
         });
     }
