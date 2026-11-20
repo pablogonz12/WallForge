@@ -11,15 +11,15 @@ use std::ffi::CString;
 pub use crate::gfx::Scaling;
 
 #[derive(Clone, Copy, PartialEq)]
-enum Blend { Alpha, Additive }
+enum Blend { Alpha, Additive, Multiply, Screen }
 
 const VS: &str = "#version 300 es
 uniform mat4 mvp; uniform vec2 size; uniform float flip; uniform vec2 uvs; uniform vec2 uvo; out vec2 uv;
 void main(){ vec2 p = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));
  uv = vec2(p.x, flip > 0.5 ? p.y : 1.0 - p.y) * uvs + uvo; gl_Position = mvp * vec4((p - 0.5) * size, 0.0, 1.0); }";
 const FS: &str = "#version 300 es
-precision highp float; in vec2 uv; out vec4 o; uniform sampler2D t; uniform vec4 tint;
-void main(){ vec4 c = texture(t, uv); o = vec4(c.rgb * tint.rgb, c.a * tint.a); }";
+precision highp float; in vec2 uv; out vec4 o; uniform sampler2D t; uniform vec4 tint; uniform float pm;
+void main(){ vec4 c = texture(t, uv); o = vec4(c.rgb * tint.rgb, c.a * tint.a); if (pm > 0.5) o.rgb *= o.a; }";
 
 fn compile(kind: u32, src: &str) -> Result<u32, String> {
     unsafe {
@@ -103,7 +103,7 @@ struct Layer {
 }
 
 pub struct Engine {
-    layers: Vec<Layer>, prog: u32, u_mvp: i32, u_size: i32, u_tint: i32, u_flip: i32, u_uvs: i32, u_uvo: i32,
+    layers: Vec<Layer>, prog: u32, u_mvp: i32, u_size: i32, u_tint: i32, u_pm: i32, u_flip: i32, u_uvs: i32, u_uvo: i32,
     vao: u32, view: Mat4, pub clear: [f32; 3], scene_wh: (f32, f32),
     pub animated: bool, pub vram: usize, pub notes: Vec<String>, scene_rt: Option<Target>, white: u32,
     out: (i32, i32), scaling: Scaling, vfs: Vfs, scene: Scene, shader_cache: HashMap<String, Option<shader::Translated>>,
@@ -130,7 +130,7 @@ fn world_of(objs: &[scene::Obj], i: usize, depth: u32) -> Mat4 {
     }
 }
 
-fn blend_of(s: &str) -> Blend { match s { "additive" => Blend::Additive, _ => Blend::Alpha } }
+fn blend_of(s: &str) -> Blend { match s { "additive" => Blend::Additive, "multiply" => Blend::Multiply, "screen" => Blend::Screen, _ => Blend::Alpha } }
 
 impl Engine {
     pub fn new(vfs: Vfs, scene: Scene, out: (i32, i32), scaling: Scaling) -> Result<Engine, String> {
@@ -145,7 +145,7 @@ impl Engine {
             gl::EnableVertexAttribArray(1); gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, 20, 12 as *const _);
             gl::Disable(gl::DEPTH_TEST); gl::Disable(gl::DITHER); gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
         }
-        let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
+        let mut e = Engine { layers: vec![], prog, u_mvp: loc(prog, "mvp"), u_size: loc(prog, "size"), u_tint: loc(prog, "tint"), u_pm: loc(prog, "pm"), u_flip: loc(prog, "flip"), u_uvs: loc(prog, "uvs"), u_uvo: loc(prog, "uvo"),
             vao, view: scene::ident(), clear: scene.clear, scene_wh: (scene.width, scene.height), animated: false, vram: 0, notes: vec![], scene_rt: None, white: 0,
             out, scaling, vfs, scene, shader_cache: HashMap::new(), t0: std::time::Instant::now(), time_override: None, videos: vec![], parts: Default::default() };
         e.rebuild();
@@ -406,8 +406,9 @@ impl Engine {
                 gl::BindFramebuffer(gl::FRAMEBUFFER, rt_fbo);
                 gl::Viewport(0, 0, self.out.0, self.out.1);
                 if l.full { gl::Disable(gl::BLEND); } else { gl::Enable(gl::BLEND); }
-                match l.blend { Blend::Alpha => gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA), Blend::Additive => gl::BlendFunc(gl::SRC_ALPHA, gl::ONE) }
+                match l.blend { Blend::Alpha => gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA), Blend::Additive => gl::BlendFunc(gl::SRC_ALPHA, gl::ONE), Blend::Multiply => gl::BlendFuncSeparate(gl::DST_COLOR, gl::ONE_MINUS_SRC_ALPHA, gl::ZERO, gl::ONE), Blend::Screen => gl::BlendFuncSeparate(gl::ONE_MINUS_DST_COLOR, gl::ONE, gl::ZERO, gl::ONE) }
                 gl::UseProgram(self.prog);
+                gl::Uniform1f(self.u_pm, if matches!(l.blend, Blend::Multiply | Blend::Screen) { 1.0 } else { 0.0 });
                 gl::UniformMatrix4fv(self.u_mvp, 1, gl::FALSE, mvp.as_ptr());
                 gl::Uniform2f(self.u_size, lsize[0], lsize[1]);
                 gl::Uniform4f(self.u_tint, l.color[0], l.color[1], l.color[2], l.alpha);
@@ -415,6 +416,7 @@ impl Engine {
                 if l.ping.is_some() { gl::Uniform2f(self.u_uvs, 1.0, 1.0); gl::Uniform2f(self.u_uvo, 0.0, 0.0); } else { let (uv, uo) = l.cell(t); gl::Uniform2f(self.u_uvs, uv[0], uv[1]); gl::Uniform2f(self.u_uvo, uo[0], uo[1]); }
                 gl::ActiveTexture(gl::TEXTURE0); gl::BindTexture(gl::TEXTURE_2D, src_tex);
                 gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
+                gl::Uniform1f(self.u_pm, 0.0);
                 gl::Disable(gl::BLEND);
             }
         }

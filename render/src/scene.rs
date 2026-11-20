@@ -156,7 +156,7 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
             color: v3(props.floats(o.get("color")), [1.0; 3]),
             parent: o.get("parent").and_then(|v| v.as_i64()),
             effects,
-            blend: o.get("colorBlendMode").and_then(|v| v.as_str()).map(String::from),
+            blend: o.get("colorBlendMode").and_then(|v| v.as_i64().map(|n| n as i32).or_else(|| v.as_str().and_then(|s| s.parse().ok()))).and_then(|n| match n { 2 => Some("multiply"), 7 => Some("screen"), 9 | 31 => Some("additive"), _ => None }).map(String::from),
             align: align_of(o.get("alignment").and_then(|v| v.as_str()).unwrap_or("center")),
         });
     }
