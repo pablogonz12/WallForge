@@ -48,6 +48,14 @@ class Item:
         return self.type
 
     @property
+    def workshop_id(self) -> str | None:
+        """Steam Workshop id, or None for a local project that was never published."""
+        if self.id.isdigit() and self.dir.parent.name == paths.APPID:
+            return self.id
+        wid = str(self.raw.get("workshopid") or "")
+        return wid if wid.isdigit() else None
+
+    @property
     def ultrawide(self) -> bool:
         if any(t.lower().startswith(("ultrawide", "dual", "triple")) for t in self.tags):
             return True

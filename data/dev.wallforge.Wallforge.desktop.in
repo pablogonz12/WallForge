@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Wallforge
+Name=WallForge
 Comment=Wallpaper Engine wallpapers on Linux: browse, tweak and download
 Exec=@EXEC@
 Icon=dev.wallforge.Wallforge

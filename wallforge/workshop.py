@@ -82,9 +82,39 @@ def browse(query="", sort="trend", page=1, tags=(), days=7, section="readytousei
             "type": next((t for t in tags_ if t in TAG_TYPES), None),
             "tags": tags_,
             "desc": r.get("short_description", ""),
-            "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=" + r["publishedfileid"],
+            "url": item_url(r["publishedfileid"]),
         })
     return {"total": found.get("total_count"), "pages": found.get("total_pages"), "items": items}
+
+
+def item_url(item_id) -> str:
+    """The Workshop page of a wallpaper: the link to share."""
+    return "https://steamcommunity.com/sharedfiles/filedetails/?id=" + str(item_id)
+
+
+_LINK = re.compile(r"(?:steamcommunity\.com/(?:sharedfiles|workshop)/filedetails/?\?(?:[^\s#]*?&)?id=|CommunityFilePage/)(\d+)")
+
+
+def parse_item_id(text: str):
+    """Workshop id from a pasted Workshop link (or a bare id), else None."""
+    t = (text or "").strip()
+    if re.fullmatch(r"\d{7,12}", t):
+        return t
+    m = _LINK.search(t)
+    return m.group(1) if m else None
+
+
+def lookup(item_id):
+    """One Workshop item as a browse() entry, or None when it is not a Wallpaper Engine wallpaper."""
+    d = details([str(item_id)])
+    r = d[0] if d else {}
+    if r.get("result") != 1 or int(r.get("consumer_app_id") or 0) != APPID:
+        return None
+    tags_ = [t["tag"] for t in r.get("tags", []) if isinstance(t, dict) and "tag" in t]
+    return {"id": r["publishedfileid"], "title": r.get("title", ""), "preview": r.get("preview_url", ""),
+            "author_steamid": r.get("creator", ""), "stars": None, "votes": None, "subs": r.get("subscriptions"),
+            "size": int(r.get("file_size") or 0), "type": next((t for t in tags_ if t in TAG_TYPES), None), "tags": tags_,
+            "desc": r.get("description", "")[:300], "url": item_url(r["publishedfileid"])}
 
 
 def details(ids):

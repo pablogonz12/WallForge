@@ -40,6 +40,7 @@ DEFAULTS = {
     },
     "outputs": {},  # connector -> {"id": item id}
     "values": {},  # item id -> {property: value} user overrides
+    "volumes": {},  # item id -> 0..100, the wallpaper's own volume (scaled by the global one)
     "favorites": [],
     "tags_seen": [],
 }
@@ -48,7 +49,7 @@ DEFAULTS = {
 def _merge(base, over):
     out = dict(base)
     for k, v in (over or {}).items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict) and k not in ("outputs", "values"):
+        if isinstance(v, dict) and isinstance(out.get(k), dict) and k not in ("outputs", "values", "volumes"):
             out[k] = _merge(out[k], v)
         else:
             out[k] = v
@@ -101,3 +102,15 @@ class Config:
 
     def reset_values(self, item_id: str):
         self.data["values"].pop(item_id, None)
+        self.data["volumes"].pop(item_id, None)
+
+    def volume_for(self, item_id: str) -> int:
+        """Effective volume 0..100: the global volume scaled by the wallpaper's own; 0 when muted."""
+        e = self.data["engine"]
+        if e.get("silent"):
+            return 0
+        try:
+            own = max(0, min(100, int(self.data["volumes"].get(item_id, 100))))
+            return round(max(0, min(100, int(e.get("volume", 100)))) * own / 100)
+        except (TypeError, ValueError):
+            return int(e.get("volume", 100))

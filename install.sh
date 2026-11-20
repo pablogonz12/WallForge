@@ -12,4 +12,4 @@ if [ -f "$here/render/Cargo.toml" ] && command -v cargo >/dev/null; then
   echo "Building the native renderer (beta)..."
   (cd "$here/render" && cargo build --release -q) && echo "Native renderer built." || echo "Native renderer build failed (optional)."
 fi
-echo "Installed. Find Wallforge in your app menu."
+echo "Installed. Find WallForge in your app menu."

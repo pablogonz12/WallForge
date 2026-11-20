@@ -1,4 +1,4 @@
-"""Wallforge: GTK4 / libadwaita front end for linux-wallpaperengine."""
+"""WallForge: GTK4 / libadwaita front end for linux-wallpaperengine."""
 from __future__ import annotations
 
 import hashlib
@@ -19,7 +19,7 @@ gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
-from . import assets, config, engine, library, monitors, paths, theme, updater, workshop  # noqa: E402
+from . import assets, config, engine, library, monitors, paths, theme, updater, weimport, workshop  # noqa: E402
 from . import __version__  # noqa: E402
 from .props import PropertyEditor  # noqa: E402
 
@@ -87,7 +87,7 @@ def make_card(title: str, preview: str | None, badge: str = "", extra: str = "")
 class Window(Adw.ApplicationWindow):
     def __init__(self, app, cfg: config.Config):
         win = cfg.data.get("window") or {}
-        super().__init__(application=app, title="Wallforge", default_width=win.get("w", 1280), default_height=win.get("h", 800))
+        super().__init__(application=app, title="WallForge", default_width=win.get("w", 1280), default_height=win.get("h", 800))
         self.cfg = cfg
         self.items: list[library.Item] = []
         self.sel: library.Item | None = None
@@ -300,6 +300,13 @@ class Window(Adw.ApplicationWindow):
         row = Adw.ActionRow(title="Monitor")
         row.add_suffix(self.out_dd)
         grp.add(row)
+        if it.kind in ("scene", "video"):
+            vol = Adw.SpinRow.new_with_range(0, 100, 5)
+            vol.set_title("Volume")
+            vol.set_subtitle("For this wallpaper only")
+            vol.set_value(self.cfg.data["volumes"].get(it.id, 100))
+            vol.connect("notify::value", lambda r, _p: self._on_volume(int(r.get_value())))
+            grp.add(vol)
         box.append(grp)
         btns = Gtk.Box(spacing=8, homogeneous=True)
         ap = Gtk.Button(label="Apply")
@@ -322,7 +329,12 @@ class Window(Adw.ApplicationWindow):
         close.connect("clicked", lambda _b: self.split.set_show_sidebar(False))
         folder = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Open the wallpaper's folder")
         folder.connect("clicked", lambda _b: Gio.AppInfo.launch_default_for_uri(it.dir.as_uri(), None))
+        wid = it.workshop_id
+        share = Gtk.Button(icon_name="send-to-symbolic", sensitive=bool(wid), tooltip_text="Share: copy the Steam Workshop link"
+                           if wid else "Not on the Steam Workshop, so there is no link to share")
+        share.connect("clicked", lambda _b: self._share(wid))
         tools.append(fav)
+        tools.append(share)
         tools.append(folder)
         tools.append(reset)
         tools.append(close)
@@ -355,6 +367,23 @@ class Window(Adw.ApplicationWindow):
             self.apply(outs, quiet=True)
         return False
 
+    def _on_volume(self, value: int):
+        if value >= 100:
+            self.cfg.data["volumes"].pop(self.sel.id, None)
+        else:
+            self.cfg.data["volumes"][self.sel.id] = value
+        if getattr(self, "_deb", None):
+            GLib.source_remove(self._deb)
+        self._deb = GLib.timeout_add(900, self._live_apply)
+
+    def _share(self, workshop_id: str):
+        """Copy the wallpaper's Steam Workshop page link; anyone can open it, or paste it into Discover here."""
+        url = workshop.item_url(workshop_id)
+        self.get_clipboard().set(url)
+        t = Adw.Toast(title="Workshop link copied", button_label="Open page", timeout=6)
+        t.connect("button-clicked", lambda _t: Gio.AppInfo.launch_default_for_uri(url, None))
+        self.toasts.add_toast(t)
+
     def _toggle_fav(self, btn):
         fav = self.cfg.data["favorites"]
         if btn.get_active() and self.sel.id not in fav:
@@ -370,8 +399,8 @@ class Window(Adw.ApplicationWindow):
         self.toasts.add_toast(Adw.Toast(title="Settings reset to the wallpaper's defaults"))
 
     # ------------------------------------------------------------------ apply
-    def apply(self, outputs: list[str], quiet=False):
-        it = self.sel
+    def apply(self, outputs: list[str], quiet=False, it: library.Item | None = None):
+        it = it or self.sel
         if not it or it.broken:
             self.toasts.add_toast(Adw.Toast(title=it.broken if it else "Nothing selected"))
             return
@@ -396,7 +425,7 @@ class Window(Adw.ApplicationWindow):
                 if getattr(self, "_building", False):
                     msg = "The renderer is still building, try again in a minute"
                 elif not shutil.which("cargo"):
-                    msg = "Install Rust and clang first (Arch: sudo pacman -S rust clang), then restart Wallforge"
+                    msg = "Install Rust and clang first (Arch: sudo pacman -S rust clang), then restart WallForge"
                 else:
                     msg = "The renderer is not built: see the banner at the top"
                 self.toasts.add_toast(Adw.Toast(title=msg))
@@ -477,16 +506,16 @@ class Window(Adw.ApplicationWindow):
         self.cfg.save()
         if not res["available"]:
             if not quiet:
-                self.toasts.add_toast(Adw.Toast(title="Wallforge is up to date"))
+                self.toasts.add_toast(Adw.Toast(title="WallForge is up to date"))
             return False
         if res["kind"] == "git" and self.cfg.data["auto_update"]:
             self._do_update(auto=True)
             return False
         if res["kind"] == "git":
-            t = Adw.Toast(title="A Wallforge update is available", button_label="Update", timeout=0)
+            t = Adw.Toast(title="A WallForge update is available", button_label="Update", timeout=0)
             t.connect("button-clicked", lambda _t: self._do_update())
         else:
-            t = Adw.Toast(title="A Wallforge update is available. Update it with your package manager.", timeout=10)
+            t = Adw.Toast(title="A WallForge update is available. Update it with your package manager.", timeout=10)
         self.toasts.add_toast(t)
         return False
 
@@ -509,7 +538,7 @@ class Window(Adw.ApplicationWindow):
             if not auto or "did not load" in err:
                 self.toasts.add_toast(Adw.Toast(title=err[:100], timeout=8))
             return False
-        t = Adw.Toast(title=f"Wallforge updated ({msg[:50]})", button_label="Restart now", timeout=0)
+        t = Adw.Toast(title=f"WallForge updated ({msg[:50]})", button_label="Restart now", timeout=0)
         t.connect("button-clicked", lambda _t: updater.restart())
         self.toasts.add_toast(t)
         return False
@@ -557,18 +586,18 @@ class Window(Adw.ApplicationWindow):
         miss = []
         if not paths.find_render() and not paths.find_engine(self.cfg.data["engine_dir"]):
             if getattr(self, "_building", False):
-                self.banner.set_title("Building the Wallforge renderer, this takes a minute or two...")
+                self.banner.set_title("Building the WallForge renderer, this takes a minute or two...")
                 self.banner.set_revealed(True)
                 return
             if not shutil.which("cargo"):
-                self.banner.set_title("Wallforge needs Rust to build its renderer: install rust and clang (Arch: sudo pacman -S rust clang), then restart.")
+                self.banner.set_title("WallForge needs Rust to build its renderer: install rust and clang (Arch: sudo pacman -S rust clang), then restart.")
                 self.banner.set_revealed(True)
                 return
             if updater.BUILD_ERROR:
                 self.banner.set_title("The renderer failed to build (" + updater.BUILD_ERROR + "). Install rust, clang, ffmpeg and libva, then restart.")
                 self.banner.set_revealed(True)
                 return
-            miss.append("the Wallforge renderer")
+            miss.append("the WallForge renderer")
         elif any(i.kind == "scene" and not i.broken for i in self.items) and not assets.have_assets(self.cfg.data["assets_dir"]):
             miss.append("Wallpaper Engine's assets (needed for scene wallpapers)")
         self.banner.set_title("Setup needed: " + " and ".join(miss) + " missing." if miss else "")
@@ -614,7 +643,7 @@ class Window(Adw.ApplicationWindow):
     def _build_discover(self):
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         bar = Gtk.Box(spacing=8, margin_top=8, margin_bottom=8, margin_start=12, margin_end=12)
-        self.w_search = Gtk.SearchEntry(placeholder_text="Search the Steam Workshop", hexpand=True)
+        self.w_search = Gtk.SearchEntry(placeholder_text="Search the Steam Workshop, or paste a Workshop link", hexpand=True)
         self.w_search.connect("activate", lambda *_: self.web_search(1))
         self.w_sort = Gtk.DropDown.new_from_strings(["Trending", "Most recent", "Most subscribed"])
         self.w_type = Gtk.DropDown.new_from_strings(["Any type", "Scene", "Video", "Web"])
@@ -652,6 +681,10 @@ class Window(Adw.ApplicationWindow):
         t = self.w_type.get_selected_item().get_string()
         tags = [] if t == "Any type" else [t]
         q = self.w_search.get_text().strip()
+        wid = workshop.parse_item_id(q)
+        if wid:
+            self._open_link(wid)
+            return
         exclude = []
         if not self.cfg.data["show_anime"]:
             exclude += ["Anime", "Girls"]
@@ -668,6 +701,34 @@ class Window(Adw.ApplicationWindow):
             except Exception as e:
                 GLib.idle_add(self._web_error, str(e))
         threading.Thread(target=work, daemon=True).start()
+
+    def _open_link(self, wid: str):
+        """A pasted Workshop link or id: show that wallpaper (in the library when it is already installed)."""
+        have = next((i for i in self.items if i.workshop_id == wid), None)
+        if have:
+            self.w_search.set_text("")
+            self.stack.set_visible_child_name("library")
+            self.select(have)
+            self.toasts.add_toast(Adw.Toast(title="Already in your library"))
+            return
+        self.w_spin.start()
+
+        def work():
+            try:
+                r = workshop.lookup(wid)
+            except Exception as e:
+                GLib.idle_add(self._web_error, str(e))
+                return
+            if r:
+                GLib.idle_add(self._show_web, {"total": 1, "pages": 1, "items": [r]})
+            else:
+                GLib.idle_add(self._link_missing)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _link_missing(self):
+        self.w_spin.stop()
+        self.toasts.add_toast(Adw.Toast(title="That link is not a Wallpaper Engine wallpaper, or it was removed"))
+        return False
 
     def _web_error(self, msg):
         self.w_spin.stop()
@@ -692,7 +753,14 @@ class Window(Adw.ApplicationWindow):
             btn = Gtk.Button()
             self._style_get(btn, r["id"])
             btn.connect("clicked", self._on_get, r)
-            inner.append(btn)
+            btn.set_hexpand(True)
+            link = Gtk.Button(icon_name="send-to-symbolic", tooltip_text="Share: copy the Steam Workshop link")
+            link.add_css_class("flat")
+            link.connect("clicked", lambda _b, i=r["id"]: self._share(i))
+            row = Gtk.Box(spacing=6)
+            row.append(btn)
+            row.append(link)
+            inner.append(row)
             self.w_flow.append(card)
         return False
 
@@ -763,7 +831,7 @@ class Window(Adw.ApplicationWindow):
         gs.add(r_eng)
         rn = paths.find_render()
         r_nat = Adw.SwitchRow(title="Native renderer (beta)", active=c.get("renderer", "native") == "native",
-                              subtitle="On by default. Plays video wallpapers with Wallforge's own Rust renderer (hardware decode, no extra "
+                              subtitle="On by default. Plays video wallpapers with WallForge's own Rust renderer (hardware decode, no extra "
                               "engine needed). Scene wallpapers still use linux-wallpaperengine." +
                               (f" Found: {rn}" if rn else " Not built yet."))
         r_nat.set_sensitive(bool(rn))
@@ -805,7 +873,7 @@ class Window(Adw.ApplicationWindow):
             b.connect("clicked", lambda btn: self._fetch_assets(btn))
             r_dl.add_suffix(b)
             gs.add(r_dl)
-            r_st = Adw.ActionRow(title="Or install through Steam instead", subtitle="Installs the full game (about 0.8 GB). Wallforge then copies the assets.")
+            r_st = Adw.ActionRow(title="Or install through Steam instead", subtitle="Installs the full game (about 0.8 GB). WallForge then copies the assets.")
             b2 = Gtk.Button(label="Open Steam", valign=Gtk.Align.CENTER)
             b2.connect("clicked", lambda _b: (Gio.AppInfo.launch_default_for_uri(assets.steam_install_uri(), None),
                                               GLib.timeout_add_seconds(10, self._poll_steam_install)))
@@ -897,9 +965,23 @@ class Window(Adw.ApplicationWindow):
                           "ignores those, run wallforge.sh --restore from its startup config.", active=autostart_enabled())
         r.connect("notify::active", lambda rr, _p: set_autostart(rr.get_active()))
         g3.add(r)
+        gw = Adw.PreferencesGroup(title="Wallpaper Engine", description="Bring over what you set up in Wallpaper Engine itself: "
+                                  "each wallpaper's customised settings and volume, the frame rate limit and the fullscreen rule.")
+        pg.add(gw)
+        we_cfgs = weimport.find_configs()
+        ri = Adw.ActionRow(title="Import settings", subtitle=str(we_cfgs[0]) if we_cfgs else
+                           "Pick config.json from the wallpaper_engine folder of the install you used (for example on your Windows drive).")
+        if we_cfgs:
+            bi = Gtk.Button(label="Import", valign=Gtk.Align.CENTER)
+            bi.connect("clicked", lambda _b: (d.close(), self._import_we(we_cfgs[0])))
+            ri.add_suffix(bi)
+        bf = Gtk.Button(label="Other file" if we_cfgs else "Choose file", valign=Gtk.Align.CENTER)
+        bf.connect("clicked", lambda _b: (d.close(), self._pick_we()))
+        ri.add_suffix(bf)
+        gw.add(ri)
         gu = Adw.PreferencesGroup(title="Updates")
         pg.add(gu)
-        top_switch(gu, "Check for updates", "check_updates", "At start and every few hours, asks GitHub whether a newer Wallforge exists.")
+        top_switch(gu, "Check for updates", "check_updates", "At start and every few hours, asks GitHub whether a newer WallForge exists.")
         top_switch(gu, "Install updates automatically", "auto_update", "Git installs only: downloads the new version in the background, "
                    "checks it loads, and asks you to restart. Package installs update through your package manager.")
         ru = Adw.ActionRow(title="Check now", subtitle=f"Version {__version__}, installed as: {updater.kind()}")
@@ -911,6 +993,63 @@ class Window(Adw.ApplicationWindow):
         n.add_css_class("dim-label")
         g3.add(n)
         d.present(self)
+
+    def _pick_we(self):
+        dlg = Gtk.FileDialog(title="Wallpaper Engine config.json")
+        flt = Gtk.FileFilter(name="config.json")
+        flt.add_pattern("*.json")
+        store = Gio.ListStore.new(Gtk.FileFilter)
+        store.append(flt)
+        dlg.set_filters(store)
+
+        def done(dl, res):
+            try:
+                f = dl.open_finish(res)
+            except GLib.Error:
+                return
+            if f.get_path():
+                self._import_we(Path(f.get_path()))
+        dlg.open(self, None, done)
+
+    def _import_we(self, path: Path):
+        """Show what a Wallpaper Engine config.json would change, then import it if confirmed."""
+        try:
+            plan = weimport.plan(path, self.items)
+        except (OSError, ValueError) as ex:
+            self.toasts.add_toast(Adw.Toast(title=str(ex)[:110] or "Could not read that file"))
+            return
+        titles = {i.id: i.title for i in self.items}
+        if plan.empty:
+            self.toasts.add_toast(Adw.Toast(title=(plan.notes() or ["Nothing to import in that file"])[0][:110], timeout=8))
+            return
+        by_id = {i.id: i for i in self.items}
+        todo = {o: by_id[i] for o, i in plan.assignments([m["name"] for m in (self._mons or monitors.outputs())]).items()
+                if i in by_id and not by_id[i].broken}
+        body = "\n".join(["From " + str(path), ""] + ["• " + s for s in plan.summary(titles)] + [""] + plan.notes()).strip()
+        ad = Adw.AlertDialog(heading="Import from Wallpaper Engine?", body=body)
+        ad.add_response("cancel", "Cancel")
+        ad.add_response("import", "Import")
+        if todo:
+            ad.add_response("apply", "Import and set wallpaper")
+        ad.set_response_appearance("import", Adw.ResponseAppearance.SUGGESTED)
+        ad.set_default_response("import")
+        ad.set_close_response("cancel")
+
+        def chosen(_d, resp):
+            if resp not in ("import", "apply"):
+                return
+            weimport.apply(self.cfg, plan)
+            if resp == "apply":
+                groups = {}
+                for o, it in todo.items():
+                    groups.setdefault(it.id, (it, []))[1].append(o)
+                for it, outs in groups.values():
+                    self.apply(outs, quiet=True, it=it)
+            if self.sel and self.split.get_show_sidebar():
+                self.select(self.sel)
+            self.toasts.add_toast(Adw.Toast(title="Imported from Wallpaper Engine: " + "; ".join(plan.summary(titles))[:90], timeout=8))
+        ad.connect("response", chosen)
+        ad.present(self)
 
     def _fetch_assets(self, btn):
         btn.set_sensitive(False)
@@ -975,7 +1114,7 @@ def set_autostart(on: bool):
         return
     launcher = shutil.which("wallforge") or str(Path(__file__).resolve().parent.parent / "wallforge.sh")
     AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
-    AUTOSTART.write_text(f"[Desktop Entry]\nType=Application\nName=Wallforge (restore wallpapers)\n"
+    AUTOSTART.write_text(f"[Desktop Entry]\nType=Application\nName=WallForge (restore wallpapers)\n"
                          f"Exec={launcher} --restore\nIcon=dev.wallforge.Wallforge\nNoDisplay=true\n"
                          "X-GNOME-Autostart-enabled=true\n")
 
@@ -1021,4 +1160,6 @@ def main():
     if "--restore" in sys.argv:
         print("started", restore(config.Config()))
         return 0
+    if "--import-we" in sys.argv:  # --import-we [config.json] [--dry-run]
+        return weimport.main(sys.argv[sys.argv.index("--import-we") + 1:])
     return App().run([sys.argv[0]])

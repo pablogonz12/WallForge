@@ -1,4 +1,4 @@
-"""Check GitHub for a newer Wallforge and update when it is a git checkout.
+"""Check GitHub for a newer WallForge and update when it is a git checkout.
 
 Git checkout: `git pull --ff-only`. Package install (AUR etc.): only tell the user, the package manager updates it.
 """
@@ -67,7 +67,7 @@ def update() -> str:
     if kind() != "git":
         raise RuntimeError("Not a git checkout: update it with your package manager")
     if _git("status", "--porcelain", "--untracked-files=no"):
-        raise RuntimeError("Local changes in the Wallforge folder; not touching them")
+        raise RuntimeError("Local changes in the WallForge folder; not touching them")
     old = _git("rev-parse", "HEAD")
     _git("pull", "--ff-only", timeout=120)
     if not _healthy():
@@ -92,7 +92,7 @@ def _rebuild_render(old: str) -> None:
 
 
 def restart() -> None:
-    """Replace this process with a fresh Wallforge (same arguments)."""
+    """Replace this process with a fresh WallForge (same arguments)."""
     import os
     os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]])
 

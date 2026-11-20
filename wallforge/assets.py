@@ -88,7 +88,7 @@ def write_script(dd: Path) -> Path:
     flist.write_text("regex:^assets/\n")
     login_id = random.randint(10_000, 2_000_000_000)
     SCRIPT.write_text(f"""#!/bin/bash
-echo "Wallforge: fetching Wallpaper Engine's assets from Steam (about 85 MB)."
+echo "WallForge: fetching Wallpaper Engine's assets from Steam (about 85 MB)."
 echo "You need an account that owns Wallpaper Engine. Your password goes to DepotDownloader only."
 echo
 read -r -p "Steam username: " U
@@ -101,7 +101,7 @@ if [ -d {shlex.quote(str(STAGE))}/assets ]; then
   rm -rf {shlex.quote(str(paths.OWN_ASSETS))}
   mv {shlex.quote(str(STAGE))}/assets {shlex.quote(str(paths.OWN_ASSETS))}
   rm -rf {shlex.quote(str(STAGE))}
-  echo; echo "Done. You can close this window and return to Wallforge."
+  echo; echo "Done. You can close this window and return to WallForge."
 else
   echo; echo "No assets were downloaded. If Steam said access denied, this account does not own Wallpaper Engine."
 fi

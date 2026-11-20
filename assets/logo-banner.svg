@@ -19,6 +19,6 @@
 <path d="M92 20 L97 33 L110 38 L97 43 L92 56 L87 43 L74 38 L87 33Z" fill="url(#sp)"/>
 <circle cx="108" cy="22" r="3.5" fill="#fbbf24"/><circle cx="72" cy="24" r="2.5" fill="#fb923c"/>
 </g>
-<text x="340" y="175" font-family="Inter, Cantarell, DejaVu Sans, sans-serif" font-weight="700" font-size="112" fill="#f5f3ff">Wallforge</text>
+<text x="340" y="175" font-family="Inter, Cantarell, DejaVu Sans, sans-serif" font-weight="700" font-size="112" fill="#f5f3ff">WallForge</text>
 <text x="344" y="232" font-family="Inter, Cantarell, DejaVu Sans, sans-serif" font-size="40" fill="#fbbf24">Wallpaper Engine for Linux</text>
 </svg>

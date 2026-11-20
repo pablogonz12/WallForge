@@ -87,10 +87,8 @@ def build_native_args(cfg, item: library.Item, output: str, overrides: dict | No
             run = texpatch.patched_dir(item.run_dir, imgs) or item.run_dir  # None when there is no package to patch
     a = [str(paths.find_render()), "--output", output, "--bg", str(run), "--scaling", scaling,
          "--fps", str(e["fps"]), "--layer", e.get("layer", "bottom")]
-    if e.get("silent"):
-        a.append("--silent")
-    else:
-        a += ["--volume", str(e["volume"])]
+    vol = cfg.volume_for(item.id)
+    a += ["--volume", str(vol)] if vol else ["--silent"]
     if item.kind == "scene":
         a_dir = paths.find_assets(cfg.data["assets_dir"])
         if a_dir:
@@ -121,10 +119,8 @@ def build_args(cfg, item: library.Item, output: str, overrides: dict | None = No
     a = [str(eng), "--screen-root", output, "--bg", str(run or item.run_dir), "--assets-dir", assets,
          "--scaling", ("fill" if e["scaling"] == "auto" else e["scaling"]), "--clamp", e["clamp"], "--fps", str(e["fps"]),
          "--layer", e.get("layer", "bottom")]
-    if e.get("silent"):
-        a.append("--silent")
-    else:
-        a += ["--volume", str(e["volume"])]
+    vol = cfg.volume_for(item.id)
+    a += ["--volume", str(vol)] if vol else ["--silent"]
     for flag, key in (("--no-audio-processing", "no_audio_processing"), ("--disable-particles", "disable_particles"),
                       ("--disable-mouse", "disable_mouse"), ("--disable-parallax", "disable_parallax"),
                       ("--no-fullscreen-pause", "no_fullscreen_pause")):
