@@ -4,6 +4,8 @@
 
 ### Your Wallpaper Engine library, running natively on Linux. One small Rust renderer, no Windows, no Wine.
 
+[![CI](https://github.com/pgm1207/WallForge/actions/workflows/ci.yml/badge.svg)](https://github.com/pgm1207/WallForge/actions/workflows/ci.yml)
+
 WallForge is a GTK4 / libadwaita app and a small GPU renderer (`wallforge-render`) that plays the
 [Wallpaper Engine](https://store.steampowered.com/app/431960/) wallpapers you already own on any Wayland desktop
 with layer-shell support (niri, Hyprland, Sway, ...).
