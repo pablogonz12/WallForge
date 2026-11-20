@@ -59,6 +59,12 @@ impl Props {
         }
     }
     pub fn floats(&self, v: Option<&Value>) -> Option<Vec<f32>> { floats(&self.resolve(v?)) }
+    /// Like `boolean`, but honours the common `applyUserProperties` visibility script.
+    pub fn visible(&self, v: Option<&Value>) -> bool {
+        if let Some(x) = v { if let Some(u) = x.get("user").and_then(|u| u.as_str()) {
+            if let Some(b) = crate::scriptvis::script_visible(x, self.map.get(u).and_then(|p| p.as_bool())) { return b; } } }
+        self.boolean(v, true)
+    }
     pub fn boolean(&self, v: Option<&Value>, d: bool) -> bool {
         match v.map(|x| self.resolve(x)) {
             Some(Value::Bool(b)) => b, Some(Value::Number(n)) => n.as_f64().unwrap_or(0.0) != 0.0,
@@ -119,7 +125,7 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
     let mut objects = vec![];
     for o in j.get("objects").and_then(|v| v.as_array()).ok_or("scene.json: no objects")? {
         let name = o.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if !props.boolean(o.get("visible"), true) { continue; }
+        if !props.visible(o.get("visible")) { continue; }
         let id = o.get("id").and_then(|v| v.as_i64()).unwrap_or(-1);
         let kind = if let Some(i) = o.get("image").and_then(|v| v.as_str()) { Kind::Image { model: i.to_string() }
             } else if let Some(p) = o.get("particle").and_then(|v| v.as_str()) { Kind::Particle { file: p.to_string(), ov: o.get("instanceoverride").and_then(|v| v.as_object()).map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), props.floats(Some(v))?))).collect()).unwrap_or_default() }
