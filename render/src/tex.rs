@@ -30,14 +30,17 @@ pub struct SpriteFrame { pub x: f32, pub y: f32, pub w: f32, pub h: f32, pub dur
 
 /// Parses the body of a TEXS section (after the magic): u32 count, u32 w, u32 h, then 32-byte records
 /// [u32 image, f32 time, f32 x, f32 y, f32 w, f32 wy, f32 hx, f32 h].
-pub fn parse_frames(b: &[u8]) -> Vec<SpriteFrame> {
+pub fn parse_frames(b: &[u8]) -> Vec<SpriteFrame> { parse_frames_at(b, 12) }
+/// TEXS0001 has no w/h words after the count: records start at offset 4.
+pub fn parse_frames_at(b: &[u8], hdr: usize) -> Vec<SpriteFrame> {
     let u = |o: usize| b.get(o..o + 4).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]));
-    let f = |o: usize| u(o).map(f32::from_bits);
+    let ints = hdr == 4; // TEXS0001 stores the rectangle as integers
+    let f = |o: usize| u(o).map(|x| if ints && o % 32 != (hdr + 4) % 32 { x as f32 } else { f32::from_bits(x) });
     let Some(n) = u(0) else { return vec![] };
     if n == 0 || n > 4096 { return vec![]; }
     let mut v = vec![];
     for k in 0..n as usize {
-        let o = 12 + k * 32;
+        let o = hdr + k * 32;
         let (Some(dur), Some(x), Some(y), Some(w), Some(h)) = (f(o + 4), f(o + 8), f(o + 12), f(o + 16), f(o + 28)) else { return vec![] };
         let (w, h) = (w.abs().max(f(o + 20).unwrap_or(0.0).abs()), h.abs().max(f(o + 24).unwrap_or(0.0).abs()));
         if !(w >= 1.0 && h >= 1.0) { return vec![]; }
@@ -116,7 +119,10 @@ pub fn parse(b: &[u8], header_only: bool) -> Result<Tex, String> {
     if ver == 4 { mp4 = r.u32()? == 1; }
     let mut layout = ver.min(3);
     if ver == 4 && mp4 { layout = 4; }
-    let frames = b.windows(8).position(|w| w == b"TEXS0003" || w == b"TEXS0002" || w == b"TEXS0001").map(|i| parse_frames(&b[i + 9..])).unwrap_or_default();
+    // some GIF templates store a header size (the image size) smaller than the stored, padded sprite sheet: trust the stored mip size
+    let (tex_w, tex_h) = if layout < 4 && !header_only { match (r.b.get(r.p + 4..r.p + 8), r.b.get(r.p + 8..r.p + 12)) {
+        (Some(w), Some(h)) => { let (w, h) = (u32::from_le_bytes([w[0], w[1], w[2], w[3]]), u32::from_le_bytes([h[0], h[1], h[2], h[3]])); if w >= tex_w && h >= tex_h && w <= 16384 && h <= 16384 && b.windows(8).any(|x| x == b"TEXS0001") { (w, h) } else { (tex_w, tex_h) } } _ => (tex_w, tex_h) } } else { (tex_w, tex_h) };
+    let frames = b.windows(8).position(|w| w == b"TEXS0003" || w == b"TEXS0002" || w == b"TEXS0001").map(|i| parse_frames_at(&b[i + 9..], if &b[i..i + 8] == b"TEXS0001" { 4 } else { 12 })).unwrap_or_default();
     let frames: Vec<SpriteFrame> = if frames.len() > 1 && frames.iter().all(|f| f.x >= 0.0 && f.y >= 0.0 && f.x + f.w <= tex_w as f32 + 0.5 && f.y + f.h <= tex_h as f32 + 0.5) { frames } else { vec![] };
     let frame = frames.first().map(|f| (f.w as u32, f.h as u32));
     if std::env::var("WF_DBG").is_ok() { eprintln!("tex frame={:?} {}x{} img {}x{}", frame, tex_w, tex_h, img_w, img_h); }

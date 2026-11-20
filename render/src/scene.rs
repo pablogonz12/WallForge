@@ -116,7 +116,8 @@ pub struct Scene {
 pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
     let g = j.get("general").ok_or("scene.json: no \"general\"")?;
     let mut fatal = vec![]; let mut warnings = vec![];
-    let (width, height) = match g.get("orthogonalprojection") {
+    let auto_size = g.get("orthogonalprojection").map_or(false, |o| o.get("width").map_or(true, |v| v.is_null()) || o.get("height").map_or(true, |v| v.is_null()));
+    let (mut width, mut height) = match g.get("orthogonalprojection") {
         Some(o) => (props.floats(o.get("width")).and_then(|v| v.first().copied()).unwrap_or(1920.0),
                     props.floats(o.get("height")).and_then(|v| v.first().copied()).unwrap_or(1080.0)),
         None => { fatal.push("perspective (3D) camera".into()); (1920.0, 1080.0) }
@@ -166,6 +167,8 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
             align: align_of(o.get("alignment").and_then(|v| v.as_str()).unwrap_or("center")),
         });
     }
+    // auto projection (GIF-template scenes: width/height null): the scene is as large as its biggest sized layer
+    if auto_size { if let Some(sz) = objects.iter().filter(|o| matches!(o.kind, Kind::Image { .. })).filter_map(|o| o.size.map(|s| [s[0] * o.scale[0].abs(), s[1] * o.scale[1].abs()])).max_by(|a, b| (a[0] * a[1]).total_cmp(&(b[0] * b[1]))) { if sz[0] > 0.0 && sz[1] > 0.0 { width = sz[0]; height = sz[1]; } } }
     Ok(Scene { width, height, clear, objects, fatal, warnings })
 }
 
