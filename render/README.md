@@ -53,7 +53,14 @@ Also supported:
   float array indices, float `%`, varying width mismatches). The translator patches the source from the compiler's
   error log and retries, so such effects compile instead of being skipped.
 
-Not yet: SceneScript, audio-reactive uniforms (they read as silence), sound objects, puppet animation, parallax,
+- Audio-reactive effects: the default sink's monitor is captured (libpulse-simple, `@DEFAULT_MONITOR@`) on a thread and
+  a windowed 1024-point FFT feeds `g_AudioSpectrum{16,32,64}{Left,Right}` (and the unsuffixed averages). Capture only
+  starts when a loaded shader asks for those uniforms; `--no-audio-processing` turns it off. A scene whose only motion
+  comes from audio still redraws when the spectrum changes.
+- `--no-audio-processing` also applies to the video path's audio analysis; it is the switch behind
+  Settings > Effects and power.
+
+Not yet: SceneScript, sound objects, puppet animation, parallax,
 mouse interaction, particle trails/ropes/control points. 3D scenes (perspective camera / `.mdl`) print one line and
 exit with code 3. The user-facing list is in [`docs/compatibility.md`](../docs/compatibility.md).
 
