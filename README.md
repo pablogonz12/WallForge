@@ -241,6 +241,17 @@ You do not need Wallpaper Engine installed, but you do need to own it. Scene wal
 
 Workshop wallpapers themselves are downloaded by the Steam client when you subscribe.
 
+## Other sources
+
+Wallpapers do not have to come from the Workshop. Click **+** in the header (or run `wallforge --import PATH`) and pick:
+
+- **Video or GIF** (mp4, webm, mkv, mov, gif): the file is *linked*, not copied, so big videos use no extra disk. If you move or delete the original, the item shows as broken; use `--copy` to keep a copy instead.
+- **Image**: shown as a full-screen page.
+- **HTML folder** (or an `index.html`): copied in as a web wallpaper.
+- **Lively `.zip`**: video, GIF, web and picture packages work. Lively app, Unity, Godot, URL and BizHawk wallpapers are refused with a message.
+
+Items live in `~/.local/share/wallforge/library/local-*/` with a normal `project.json`, show up in the grid (filter **Local**), and can be removed from their detail panel. Workshop content is never deleted. A preview is made with `ffmpeg` when it is installed. Only add packages you trust: web wallpapers run as web pages.
+
 ## Command line
 
 `wallforge` is the command from a package install; from a checkout it is `./wallforge.sh`. Both take the same flags.
@@ -251,6 +262,7 @@ Workshop wallpapers themselves are downloaded by the Steam client when you subsc
 | `wallforge --restore` | Re-apply the saved wallpapers and exit, for autostart. |
 | `wallforge --doctor` | Check the setup (Wayland, layer-shell, GTK, assets, renderer, decode) and exit; read-only, no display needed, exit code 1 when something is broken. |
 | `wallforge --import-we [FILE] [--dry-run]` | Import Wallpaper Engine's settings. |
+| `wallforge --import PATH... [--copy]` | Add a video, image, HTML folder or Lively `.zip` to the library (see [Other sources](#other-sources)). |
 
 The renderer and the web player can also be run on their own; see [`render/README.md`](render/README.md) for
 `wallforge-render --check`, `--scale`, `--no-audio-processing` and the rest.
