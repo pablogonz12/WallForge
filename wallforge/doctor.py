@@ -60,7 +60,7 @@ def _session() -> tuple[str, str]:
     if not os.environ.get("WAYLAND_DISPLAY") and kind != "wayland":
         return BAD, f"{desktop} on {kind or 'an unknown session'}: WallForge draws with layer-shell, which needs Wayland"
     if "GNOME" in desktop.upper():
-        return BAD, f"{desktop} does not implement layer-shell; use niri, Hyprland, Sway or river"
+        return BAD, f"{desktop} does not implement layer-shell; use niri, Hyprland, Sway, river or Plasma 6.7+"
     return OK, f"{desktop} on {kind or 'wayland'}"
 
 

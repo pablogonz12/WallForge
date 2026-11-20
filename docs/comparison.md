@@ -19,6 +19,8 @@ Everything below is about projects that play **Wallpaper Engine** content, not a
 | Web wallpapers | WebKit on the wallpaper layer | — |
 | Audio-reactive visuals | Yes, from the system's output monitor | Yes |
 | X11 | No | Yes |
+| KDE Plasma | Yes on Plasma 6.7+ (KWin implements wlr-layer-shell) | Yes |
+| GNOME Shell | No (no layer-shell; needs a Shell extension) | No, unless it draws on X11 |
 | Background audio, playlist, screen-span options | Volume, mute, per-wallpaper volume | Large CLI option set |
 | Needs Wallpaper Engine installed | No, it only needs the `assets/` folder (which you must own; it can fetch it from Steam) | Usually yes — it reads Steam's install folder |
 

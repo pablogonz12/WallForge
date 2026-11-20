@@ -257,7 +257,18 @@ fn main() {
     let qh = queue.handle();
     let mut app = App { outputs: vec![], configured: false, closed: false, size: (0, 0), resized: false, cb_ready: true, frac: 0 };
     let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=6, ()).expect("wl_compositor");
-    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = globals.bind(&qh, 1..=4, ()).expect("zwlr_layer_shell_v1 (compositor lacks layer-shell)");
+    // Layer-shell is how a wallpaper gets attached behind every window. GNOME Shell does not implement it,
+    // so say what is wrong and what to do instead of dying with a protocol bind error.
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = match globals.bind(&qh, 1..=4, ()) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("wallforge-render: this compositor does not implement wlr-layer-shell, so a wallpaper cannot be \
+                       placed behind your windows.");
+            eprintln!("  Supported: niri, Hyprland, Sway, river, Wayfire, labwc, KDE Plasma 6.7+.");
+            eprintln!("  GNOME Shell does not implement it and cannot be supported this way (tracked in the WallForge repo).");
+            std::process::exit(2);
+        }
+    };
     let outs: Vec<(u32, u32)> = globals.contents().with_list(|l| l.iter().filter(|g| g.interface == "wl_output").map(|g| (g.name, g.version)).collect());
     for (name, ver) in outs {
         let o = globals.registry().bind::<wl_output::WlOutput, _, _>(name, ver.min(4), &qh, ());

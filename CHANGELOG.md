@@ -16,6 +16,9 @@
 
 ### Changed
 
+- **KDE Plasma 6.7+** implements `wlr-layer-shell`, so WallForge draws there; the docs, the FAQ, `--doctor` and the
+  renderer's error messages now say so. A compositor without layer-shell (GNOME Shell) gets an explanation and a
+  pointer to the tracking issue instead of a protocol bind error.
 - Settings > Setup describes the app as it is: WallForge's own renderer plays video, scene and web wallpapers. The
   linux-wallpaperengine row only appears when it is installed, as an optional fallback switch. Status icons render
   on every icon theme, and paths are shown relative to your home folder.
