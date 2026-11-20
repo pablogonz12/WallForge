@@ -299,9 +299,10 @@ def preload(cfg, item: library.Item, output: str) -> bool:
     wallpaper, and switching is then just stopping the current one. Costs the spare's VRAM until it is used.
     """
     e = cfg.data["engine"]
-    # The spare has to sit *below* the visible wallpaper, and only "bottom" has a layer under it.
-    if e.get("layer", "bottom") != "bottom" or current_layer(output) != "bottom" or window_mode():
-        return False  # window mode (GNOME) has no layers to stack a spare under
+    # The spare lives on the SAME layer as the visible wallpaper (niri's blur/xray samples only `background`, so the
+    # visible one must be there if the user chose it) and is started `--hidden`: it never presents until promoted.
+    if window_mode():
+        return False  # window mode (GNOME) has no layers
     if item.kind == "web" or not use_native(cfg, item):
         return False
     cur = spare(output)
@@ -311,9 +312,7 @@ def preload(cfg, item: library.Item, output: str) -> bool:
     ready = STATE / f"{output}.spare.ready"
     ready.unlink(missing_ok=True)
     args = build_native_args(cfg, item, output)
-    if "--layer" in args:
-        args[args.index("--layer") + 1] = "background"
-    args += ["--ready-file", str(ready)]
+    args += ["--hidden", "--ready-file", str(ready)]
     STATE.mkdir(parents=True, exist_ok=True)
     log = open(STATE / f"{output}.spare.log", "w")
     try:
@@ -349,11 +348,12 @@ def promote(cfg, item: library.Item, output: str) -> bool:
     if not sp or sp.get("id") != item.id:
         return False
     pids = find_pids(output)
+    try: os.kill(int(sp["pid"]), signal.SIGUSR1)  # start presenting (it maps above the old one, same layer)
+    except ProcessLookupError: return False
     for pid in pids:
         try: os.kill(pid, signal.SIGTERM)
         except ProcessLookupError: pass
     _pidfile(output).write_text(str(sp["pid"]))
-    _layer_file(output).write_text("background")  # the promoted spare keeps the layer it was started on
     _spare_file(output).unlink(missing_ok=True)
     return True
 

@@ -32,6 +32,14 @@ use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_ba
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 static STOP: AtomicBool = AtomicBool::new(false);
+/// A `--hidden` spare draws (warm GL, textures, decoder) but never presents, so the compositor has nothing to show
+/// or sample, until SIGUSR1 clears this.
+pub static HIDDEN: AtomicBool = AtomicBool::new(false);
+extern "C" fn on_usr1(_: i32) {
+    HIDDEN.store(false, Ordering::SeqCst);
+    let fd = SIG_PIPE_W.load(Ordering::SeqCst);
+    if fd >= 0 { unsafe { libc::write(fd, [1u8].as_ptr() as *const _, 1); } }
+}
 static SIG_PIPE_W: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 extern "C" fn on_signal(_: i32) {
     STOP.store(true, Ordering::SeqCst);
@@ -76,17 +84,18 @@ struct Args {
     shot_time: f32,
     scale: u32,
     ready_file: Option<String>,
+    hidden: bool,
 }
 
 fn usage() -> ! {
     eprintln!("usage: wallforge-render --output NAME --bg <dir|video> [--scaling fill|fit|stretch] [--fps N] \
-               [--scale 25..100] [--layer background|bottom|top|overlay] [--window] [--silent] [--no-audio-processing] [--volume N] [--duration SECS] [--software] [--disable-particles] [--assets-dir DIR] [--set-property key=value]...\n       wallforge-render --check <dir|video>   (probe, print one JSON line, no window)");
+               [--scale 25..100] [--hidden] [--layer background|bottom|top|overlay] [--window] [--silent] [--no-audio-processing] [--volume N] [--duration SECS] [--software] [--disable-particles] [--assets-dir DIR] [--set-property key=value]...\n       wallforge-render --check <dir|video>   (probe, print one JSON line, no window)");
     std::process::exit(2)
 }
 
 fn parse_args() -> Args {
     let mut a = Args { output: String::new(), bg: PathBuf::new(), scaling: Scaling::Fill, fps: 30.0,
-        layer: zwlr_layer_shell_v1::Layer::Background, window: false, duration: None, force_sw: false, volume: 100, silent: false, check: false, assets_dir: None, props: vec![], make_test: None, screenshot: None, ready_file: None, shot_size: (1920, 1080), shot_time: 0.0, scale: 100 };
+        layer: zwlr_layer_shell_v1::Layer::Background, window: false, duration: None, force_sw: false, volume: 100, silent: false, check: false, assets_dir: None, props: vec![], make_test: None, screenshot: None, ready_file: None, hidden: false, shot_size: (1920, 1080), shot_time: 0.0, scale: 100 };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| usage());
@@ -108,6 +117,7 @@ fn parse_args() -> Args {
             "--assets-dir" => a.assets_dir = Some(PathBuf::from(val())),
             "--window" => a.window = true,
             "--ready-file" => a.ready_file = Some(val()),
+            "--hidden" => a.hidden = true,
             "--set-property" => { let v = val(); match v.split_once('=') { Some((k, x)) => a.props.push((k.to_string(), x.to_string())), None => usage() } }
             "--screenshot" => a.screenshot = Some(PathBuf::from(val())),
             "--screenshot-size" => { let v = val(); match v.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))) { Some(s) => a.shot_size = s, None => usage() } }
@@ -332,6 +342,7 @@ fn main() {
         sa.sa_sigaction = on_signal as *const () as usize;
         libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
         libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
+        if args.hidden { HIDDEN.store(true, Ordering::SeqCst); let mut su: libc::sigaction = std::mem::zeroed(); su.sa_sigaction = on_usr1 as *const () as usize; libc::sigaction(libc::SIGUSR1, &su, std::ptr::null_mut()); }
     }
 
     let conn = Connection::connect_to_env().unwrap_or_else(|e| { eprintln!("wayland connect: {e}"); std::process::exit(1) });
@@ -432,6 +443,7 @@ fn main() {
         match video::Decoder::open(&video_path, false, args.fps) { Ok(d) => { *dec = d; true } Err(e) => { eprintln!("wallforge-render: software reopen failed: {e}"); false } }
     };
 
+    let mut was_hidden = false;
     while !STOP.load(Ordering::SeqCst) && !app.closed {
         if let Some(d) = args.duration { if start.elapsed().as_secs_f64() >= d { break; } }
         if dbg && st_t.elapsed() >= Duration::from_secs(2) { eprintln!("wallforge-render: sleeps {} blocking polls {} shown {} in 2s", st_to, st_ev, shown); st_to = 0; st_ev = 0; st_t = Instant::now(); }
@@ -450,6 +462,7 @@ fn main() {
             eprintln!("wallforge-render: surface {}x{} logical -> {}x{} physical (scale {})", app.size.0, app.size.1, bw, bh, if app.frac > 0 { app.frac as f64 / 120.0 } else { scale as f64 });
             dirty = true;
         }
+        if was_hidden && !HIDDEN.load(Ordering::SeqCst) { was_hidden = false; app.cb_ready = true; dirty = true; first = false; last_render = Instant::now(); base_wall = last_render; base_pts = ring.back().map(|f| f.pts).unwrap_or(0.0); next_slot = base_wall; }
         let now = Instant::now();
         if (app.cb_ready && now >= next_due) || (dirty && !first) {
             if now.duration_since(last_render) > Duration::from_millis(500) && !first {
@@ -495,9 +508,10 @@ fn main() {
                 changed = true; shown += 1;
             }
             if changed || dirty {
-                if app.cb_ready { surface.frame(&qh, ()); app.cb_ready = false; }
+                let hid = HIDDEN.load(Ordering::SeqCst);
+                if !hid && app.cb_ready { surface.frame(&qh, ()); app.cb_ready = false; }
                 gfx.draw(bw, bh, is_native);
-                unsafe { eglSwapBuffers(dpy, esurf); }
+                if !hid { unsafe { eglSwapBuffers(dpy, esurf); } } else { app.cb_ready = false; was_hidden = true; } // warm only: stay unmapped
                 dirty = false;
                 if dbg && changed { let g = last_present.elapsed(); if g > period * 2 { eprintln!("wallforge-render: present gap {:.1} ms", g.as_secs_f64() * 1e3); } }
                 last_present = Instant::now();

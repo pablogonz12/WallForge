@@ -62,6 +62,7 @@ pub fn run(args: Args) {
         sa.sa_sigaction = crate::on_signal as *const () as usize;
         libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
         libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
+        if args.hidden { crate::HIDDEN.store(true, Ordering::SeqCst); let mut su: libc::sigaction = std::mem::zeroed(); su.sa_sigaction = crate::on_usr1 as *const () as usize; libc::sigaction(libc::SIGUSR1, &su, std::ptr::null_mut()); }
     }
 
     let ready_file = args.ready_file.clone();
@@ -150,6 +151,7 @@ pub fn run(args: Args) {
     let mut next_due = Instant::now();
     let mut dirty = true;
     let mut shown = 0u64;
+    let mut was_hidden = false;
     while !STOP.load(Ordering::SeqCst) && !app.closed {
         if let Some(d) = args.duration { if start.elapsed().as_secs_f64() >= d { break; } }
         if let Err(e) = queue.dispatch_pending(&mut app) { eprintln!("wallforge-render: wayland error ({e}); exiting"); break; }
@@ -165,13 +167,15 @@ pub fn run(args: Args) {
             dirty = true;
         }
         if engine.text_tick() { dirty = true; }
+        if was_hidden && !crate::HIDDEN.load(Ordering::SeqCst) { was_hidden = false; app.cb_ready = true; dirty = true; }
         let now = Instant::now();
         if app.cb_ready && (dirty || ((engine.animated || engine.audio_dirty) && now >= next_due)) {
             engine.tick();
-            surface.frame(&qh, ());
+            let hid = crate::HIDDEN.load(Ordering::SeqCst);
+            if !hid { surface.frame(&qh, ()); }
             app.cb_ready = false;
             engine.draw();
-            unsafe { eglSwapBuffers(dpy, esurf); }
+            if !hid { unsafe { eglSwapBuffers(dpy, esurf); } } else { was_hidden = true; }
             dirty = false; shown += 1;
             if shown == 1 { if let Some(r) = &app.ready_file { let _ = std::fs::write(r, "1"); } }
             next_due = if next_due + period < now { now + period } else { next_due + period };
