@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = "https://github.com/pgm1207/wallforge"
+REPO = "https://github.com/pgm1207/WallForge"
 ROOT = Path(__file__).resolve().parent.parent
 
 

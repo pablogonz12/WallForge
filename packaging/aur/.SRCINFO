@@ -2,7 +2,7 @@ pkgbase = wallforge-git
 	pkgdesc = Wallpaper Engine wallpapers on Wayland: native renderer for video, scene and web wallpapers, library, Workshop browser
 	pkgver = r0.0000000
 	pkgrel = 1
-	url = https://github.com/pgm1207/wallforge
+	url = https://github.com/pgm1207/WallForge
 	arch = x86_64
 	arch = aarch64
 	license = MIT
@@ -28,7 +28,7 @@ pkgbase = wallforge-git
 	optdepends = python-pywal: palette sync
 	provides = wallforge
 	conflicts = wallforge
-	source = git+https://github.com/pgm1207/wallforge.git
+	source = git+https://github.com/pgm1207/WallForge.git
 	sha256sums = SKIP
 
 pkgname = wallforge-git

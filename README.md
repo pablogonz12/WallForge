@@ -78,7 +78,7 @@ sudo pacman -S python-gobject gtk4 libadwaita python-pillow python-aiohttp ffmpe
 ### From source
 
 ```bash
-git clone https://github.com/pgm1207/wallforge
+git clone https://github.com/pgm1207/WallForge
 cd wallforge
 ./install.sh        # builds the renderer (about a minute), adds a menu entry and icon
 ./wallforge.sh
@@ -148,7 +148,7 @@ you and leaves the update to your package manager.
 ## When a wallpaper looks wrong
 
 Scene wallpapers are the hard part, and some still render differently from Wallpaper Engine. Please
-[open an issue](https://github.com/pgm1207/wallforge/issues/new/choose) with the wallpaper's Workshop link (the share
+[open an issue](https://github.com/pgm1207/WallForge/issues/new/choose) with the wallpaper's Workshop link (the share
 button copies it) and the log, which is at `$XDG_RUNTIME_DIR/wallforge/<output>.log` or behind "View log" in the
 crash toast. [docs/troubleshooting.md](docs/troubleshooting.md) covers the common problems.
 
