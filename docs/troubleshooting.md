@@ -72,6 +72,10 @@ Lower Settings > Effects and power > Render resolution to 75% or 50% (scenes onl
 the frame rate limit to 24–30, and turn off particles if you do not need them. "Reduce frame rate and resolution on
 battery" does this automatically while discharging.
 
+**The wallpaper changes by itself every so often.**
+Settings > Playback > "Change wallpaper every" is on. Set it to 0 to keep one wallpaper, or turn off "Give each
+screen its own wallpaper" if you want both screens to change together. `Ctrl+Shift+N` changes immediately.
+
 **A wallpaper stopped and the playing bar says "stopped after repeated crashes".**
 The renderer died three times in five minutes and WallForge stopped retrying to avoid a restart loop. The reason is in
 the log (Settings > About > View log); send it with a bug report. Pressing play on the wallpaper starts it again.
