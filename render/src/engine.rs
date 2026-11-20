@@ -313,6 +313,10 @@ impl Engine {
         let mut names: Vec<Option<String>> = mat.textures.clone();
         for (i, t) in ep.textures.iter().enumerate() { if names.len() <= i { names.resize(i + 1, None); } if t.is_some() { names[i] = t.clone(); } }
         if let Some((_, ts, _)) = ov { for (i, t) in ts.iter().enumerate() { if names.len() <= i { names.resize(i + 1, None); } if t.is_some() { names[i] = t.clone(); } } }
+        // sampler annotation `"default": "pattern/x"` supplies the texture when nothing is bound to the slot
+        for u in &tr.uniforms { if let (Some(i), Some(d)) = (u.name.strip_prefix("g_Texture").and_then(|n| n.parse::<usize>().ok()), u.default.as_ref().and_then(|d| d.as_str())) {
+            if i > 0 && u.ty == "sampler2D" && !d.is_empty() { if names.len() <= i { names.resize(i + 1, None); } if names[i].is_none() { names[i] = Some(d.to_string()); } }
+        } }
         let mut textures = vec![]; let mut binds = vec![(0usize, "previous".to_string())];
         for (i, n) in names.iter().enumerate() {
             let bound = ep.bind.iter().find(|b| b.1 == i).map(|b| b.0.clone());
