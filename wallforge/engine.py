@@ -149,6 +149,13 @@ def best_scaling(item: library.Item, output: str) -> str:
         return "fill"
 
 
+def window_mode() -> bool:
+    """True where the compositor has no wlr-layer-shell (GNOME): the renderer then runs as a window for the extension."""
+    if os.environ.get("WALLFORGE_WINDOW") in ("0", "1"):
+        return os.environ["WALLFORGE_WINDOW"] == "1"
+    return "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
+
+
 def build_native_args(cfg, item: library.Item, output: str, overrides: dict | None = None) -> list[str]:
     e = cfg.data["engine"]
     scaling = e["scaling"]
@@ -168,6 +175,8 @@ def build_native_args(cfg, item: library.Item, output: str, overrides: dict | No
     fps, scale = effective(cfg)
     a = [str(paths.find_render()), "--output", output, "--bg", str(run), "--scaling", scaling,
          "--fps", str(fps), "--layer", e.get("layer", "bottom")]
+    if window_mode():
+        a.append("--window")
     vol = cfg.volume_for(item.id)
     a += ["--volume", str(vol)] if vol else ["--silent"]
     if item.kind == "scene":
@@ -291,8 +300,8 @@ def preload(cfg, item: library.Item, output: str) -> bool:
     """
     e = cfg.data["engine"]
     # The spare has to sit *below* the visible wallpaper, and only "bottom" has a layer under it.
-    if e.get("layer", "bottom") != "bottom" or current_layer(output) != "bottom":
-        return False
+    if e.get("layer", "bottom") != "bottom" or current_layer(output) != "bottom" or window_mode():
+        return False  # window mode (GNOME) has no layers to stack a spare under
     if item.kind == "web" or not use_native(cfg, item):
         return False
     cur = spare(output)

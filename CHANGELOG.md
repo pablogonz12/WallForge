@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- **GNOME 45+ support** through a bundled GNOME Shell extension: the renderer runs as a hidden window (`--window`,
+  chosen automatically on GNOME) and the extension shows it behind your windows, in the overview and in workspace
+  thumbnails. Settings > Setup has an "Install GNOME extension" button; `install.sh` and the packages ship it too.
+  Tested on GNOME Shell 51 (video wallpapers); web wallpapers are not supported there yet.
+- Monitors are discovered through Mutter on GNOME, so the connector names match.
+- KDE Plasma 6.7+ is documented as supported (tested on KWin 6.8).
+
+### Fixed
+
+- Window mode now renders at the monitor's size instead of the 1920x1048 work area, so the wallpaper is no longer
+  slightly stretched. Preloading is off in window mode.
+
 ## 0.7.0
 
 ### New

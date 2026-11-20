@@ -1,7 +1,8 @@
-"""Connected outputs on niri, Hyprland, Sway/wlroots, KDE (kscreen) or any Wayland/X11 session (GDK fallback)."""
+"""Connected outputs on niri, Hyprland, Sway/wlroots, GNOME (Mutter), KDE (kscreen) or any Wayland/X11 session (GDK fallback)."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -52,6 +53,30 @@ def _wlr():
     return [r for r in res if r["width"]]
 
 
+def _mutter():
+    """GNOME: connectors and logical sizes from org.gnome.Mutter.DisplayConfig."""
+    import gi
+    from gi.repository import Gio, GLib
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    r = bus.call_sync("org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig", "org.gnome.Mutter.DisplayConfig",
+                      "GetCurrentState", None, None, Gio.DBusCallFlags.NONE, 3000, None).unpack()
+    _serial, monitors, logical, _props = r
+    modes = {}
+    for conn, _vendor_info, mlist, _p in ((m[0][0], m[0], m[1], m[2]) for m in monitors):
+        cur = next((m for m in mlist if m[6].get("is-current")), None)
+        if cur:
+            modes[conn] = (cur[1], cur[2])
+    res = []
+    for lm in logical:
+        x, y, scale, _tr, _prim, mons, _lp = lm
+        for mon in mons:
+            conn = mon[0]
+            w, h = modes.get(conn, (0, 0))
+            if w:
+                res.append({"name": conn, "width": int(w / scale), "height": int(h / scale)})
+    return res
+
+
 def _gdk():
     import gi
     gi.require_version("Gdk", "4.0")
@@ -69,6 +94,13 @@ _BACKENDS = (("niri", _niri), ("hyprctl", _hypr), ("swaymsg", _sway), ("wlr-rand
 
 
 def outputs() -> list[dict]:
+    if "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper():
+        try:
+            res = _mutter()
+            if res:
+                return _tag(res)
+        except Exception:
+            pass
     for exe, fn in _BACKENDS:
         if shutil.which(exe):
             try:

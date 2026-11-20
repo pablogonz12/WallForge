@@ -51,5 +51,8 @@ WRAP
     install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/dev.wallforge.Wallforge.desktop"
   install -Dm644 assets/wallforge.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/dev.wallforge.Wallforge.svg"
   install -Dm644 assets/wallforge-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/dev.wallforge.Wallforge-symbolic.svg"
+  for f in gnome-extension/wallforge@pgm1207.github.io/*; do
+    install -Dm644 "$f" "$pkgdir/usr/share/gnome-shell/extensions/wallforge@pgm1207.github.io/$(basename "$f")"
+  done
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

@@ -26,6 +26,7 @@ from . import (  # noqa: E402
     assets,
     config,
     engine,
+    gnomeext,
     library,
     monitors,
     paths,
@@ -1120,6 +1121,19 @@ class Window(Adw.ApplicationWindow):
                                   subtitle=f"Optional fallback for scenes, found at {_tilde(eng)}. Off: WallForge's own renderer plays everything.")
             r_eng.connect("notify::active", lambda rr, _p: (c.update(renderer="legacy" if rr.get_active() else "native"), self.cfg.save()))
             gs.add(r_eng)
+        if gnomeext.on_gnome():
+            ok_ext = gnomeext.installed()
+            r_gx = Adw.ActionRow(title="GNOME extension", subtitle="GNOME has no wallpaper layer, so WallForge draws through its own extension. "
+                                 + ("Installed. If the wallpaper does not show, log out and back in once." if ok_ext else "Not installed yet."))
+            r_gx.add_prefix(Gtk.Image(icon_name="object-select-symbolic" if ok_ext else "dialog-warning-symbolic"))
+            b_gx = Gtk.Button(label="Reinstall" if ok_ext else "Install GNOME extension", valign=Gtk.Align.CENTER)
+
+            def do_gx(_b):
+                ok, msg = gnomeext.install()
+                self.toasts.add_toast(Adw.Toast(title=msg, timeout=10))
+            b_gx.connect("clicked", do_gx)
+            r_gx.add_suffix(b_gx)
+            gs.add(r_gx)
         src = paths.render_source()
         if not rn and src and shutil.which("cargo"):
             r_b = Adw.ActionRow(title="Build the native renderer", subtitle="Runs cargo build --release (a few minutes the first time).")

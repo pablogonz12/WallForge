@@ -184,7 +184,9 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for App {
     fn event(s: &mut Self, x: &xdg_surface::XdgSurface, e: xdg_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
         if let xdg_surface::Event::Configure { serial } = e {
             x.ack_configure(serial);
-            let sz = if s.pend.0 > 0 && s.pend.1 > 0 { s.pend } else { s.fb };
+            // Window mode: the compositor sizes the window to its work area (e.g. 1920x1048), but the wallpaper has to cover the
+            // whole output, so the output size wins and the configure size is only a fallback.
+            let sz = if s.fb.0 > 0 && s.fb.1 > 0 { s.fb } else { s.pend };
             if sz != s.size { s.size = sz; s.resized = true; }
             s.configured = true;
         }

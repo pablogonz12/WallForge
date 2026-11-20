@@ -141,9 +141,16 @@ Keyboard: `Ctrl+F` search · `Ctrl+R` random wallpaper · `Ctrl+Shift+N` rotate 
 
 ### What you need
 
-- A Wayland compositor with `wlr-layer-shell`: **niri, Hyprland, Sway, river, Wayfire, labwc**, and **KDE Plasma 6.7+**
-  (KWin implements the protocol from that release). GNOME Shell does not implement it, so WallForge cannot draw there
-  yet; see the [GNOME issue](https://github.com/pgm1207/WallForge/issues/7). X11 is not supported.
+- A Wayland desktop. X11 is not supported.
+
+  | Desktop | How it draws | Tested |
+  |---|---|---|
+  | niri, Hyprland, Sway, river, Wayfire, labwc | `wlr-layer-shell` | niri |
+  | KDE Plasma 6.7+ | `wlr-layer-shell` (KWin implements it from that release) | KWin 6.8 |
+  | GNOME 45+ | the bundled GNOME Shell extension (Settings > Setup > Install GNOME extension, or `install.sh`; log out and in once) | GNOME Shell 51, video wallpapers, headless |
+
+  On GNOME, web wallpapers are not supported yet (the web player needs layer-shell), and the extension was not tested
+  on GNOME 45 to 50.
 - Python 3.11+, GTK 4, libadwaita 1.5+, PyGObject, Pillow, aiohttp, ffmpeg. For the renderer: Rust, clang, libva and
   EGL. For web wallpapers: `webkitgtk-6.0` and `gtk4-layer-shell`.
 - Steam, signed in to an account that owns Wallpaper Engine, to download Workshop wallpapers. Scene wallpapers also
@@ -284,10 +291,9 @@ but the file.
 the wallpaper's `project.json`, `scene.json` and its shaders, and draws them with GLES on a layer-shell surface. See
 [docs/comparison.md](docs/comparison.md) for how it compares, including where the other projects do better.
 
-**Will it work on GNOME or KDE?** KDE: yes, on Plasma 6.7 and newer, because KWin began implementing `wlr-layer-shell`
-in that release (we have not tested it on every Plasma version; reports welcome). GNOME: no, GNOME Shell has no
-layer-shell support, which is the mechanism a wallpaper needs to sit behind your windows. That is
-[tracked here](https://github.com/pgm1207/WallForge/issues/7) and would need a GNOME Shell extension.
+**Will it work on GNOME or KDE?** KDE Plasma 6.7+: yes, KWin implements `wlr-layer-shell` from that release (tested on
+KWin 6.8). GNOME 45+: yes, through the bundled shell extension, because GNOME has no layer-shell (tested on GNOME Shell
+51 with video wallpapers; web wallpapers do not work there yet). See [the table above](#requirements).
 
 **Why is SceneScript not supported?** Scenes that ship a script (scripted camera moves, media panels, sequences) run
 only part of their logic here; the picture still appears, but it can be incomplete. It is the largest remaining gap

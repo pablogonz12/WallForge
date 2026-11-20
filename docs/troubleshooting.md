@@ -56,8 +56,11 @@ Steam). If Steam is somewhere unusual, start with `WALLFORGE_STEAM=/path/to/Stea
 rescan.
 
 **Nothing appears on the desktop.**
-The compositor must support `wlr-layer-shell` (niri, Hyprland, Sway, river, labwc, KDE Plasma). GNOME Shell does
-not. If another wallpaper tool draws on the same layer above WallForge, change Settings > Playback > Layer between
+The compositor must support `wlr-layer-shell` (niri, Hyprland, Sway, river, labwc, KDE Plasma 6.7+). GNOME Shell
+does not, so it needs the WallForge extension: Settings > Setup > Install GNOME extension (or `./install.sh`), then log
+out and back in once, because GNOME on Wayland only finds new extensions at login. Check it with
+`gnome-extensions info wallforge@pgm1207.github.io` (State should be ACTIVE) and `wallforge --doctor`. Web wallpapers
+do not work on GNOME yet. If another wallpaper tool draws on the same layer above WallForge, change Settings > Playback > Layer between
 `bottom` and `background`.
 
 **Web wallpapers say something is missing.**
