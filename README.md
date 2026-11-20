@@ -6,6 +6,7 @@
   <a href="https://github.com/pgm1207/WallForge/actions/workflows/ci.yml"><img src="https://github.com/pgm1207/WallForge/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/pgm1207/WallForge/releases/latest"><img src="https://img.shields.io/github/v/release/pgm1207/WallForge?color=blue" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
+  <a href="https://pgm1207.github.io/WallForge/"><img src="https://img.shields.io/badge/Arch-pacman%20repo-blue" alt="Arch pacman repository"></a>
   <img src="https://img.shields.io/badge/Wayland-layer--shell-6e56cf" alt="Wayland layer-shell">
 </p>
 

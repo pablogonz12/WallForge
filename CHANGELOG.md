@@ -15,7 +15,9 @@
 
 - README: demo animation from the renderer, real screenshots, measured performance with the command that reproduces
   it, and a five-line install.
-- AUR: the PKGBUILD builds and packages cleanly; `.SRCINFO` is generated for the AUR submission.
+- **Arch repository**: `arch-repo.yml` builds and publishes a package to a pacman repository on gh-pages on every
+  release, so `sudo pacman -Sy wallforge` installs and updates it. The AUR package is prepared as well (`.SRCINFO`,
+  publish steps in `packaging/aur/README.md`); AUR registration is currently closed by the AUR team.
 
 ## 0.6.0
 
