@@ -95,6 +95,9 @@ Settings that trade a little sharpness for a lot less GPU time:
   and that you are least likely to notice under your windows.
 - **Reduce frame rate and resolution on battery**: while discharging, the limit drops to 30 fps and the render scale to
   75% at most, without touching your settings.
+- **Preload the next wallpaper**: the next pick (rotation, Ctrl+Shift+N) is loaded behind the current one, so the
+  switch is one frame (~30 ms) instead of a load. It costs that wallpaper's memory while it waits; turn it off if your
+  GPU is short on memory.
 - **Pause wallpapers on battery**: stops every wallpaper while discharging and brings them back when you plug in.
 
 If a wallpaper stops on its own, WallForge restarts it; after three failures in five minutes it leaves the screen idle

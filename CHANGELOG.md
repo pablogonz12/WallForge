@@ -16,6 +16,11 @@
 
 ### Changed
 
+- **Preloading**: after a switch, the next wallpaper (the one rotation or Ctrl+Shift+N would pick) is loaded on the
+  layer below the current one, so the switch to it is a single frame: measured 27–29 ms on the screen, against
+  130–180 ms for a cold scene and ~500 ms for a scene with 352 MB of textures or a video. Costs the preloaded
+  wallpaper's memory until it is used; toggle in Settings > Effects and power, and it is off in `background` layer mode
+  where there is no layer below to hide in.
 - **Instant wallpaper switching**: the new renderer is started before the old one is stopped and the old wallpaper
   stays on screen until the new one presents its first frame (110–160 ms for most scenes), so switching is a cut
   instead of a black flash. The renderer gained `--ready-file` for this; web wallpapers still replace each other

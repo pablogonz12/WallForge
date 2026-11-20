@@ -40,6 +40,7 @@ DEFAULTS = {
         "layer": "bottom",  # bottom|background (background pairs with niri place-within-backdrop)
         "silent": False,
         "volume": 100,
+        "preload_next": True,  # keep the next wallpaper loaded on the layer below, so switching is instant
         "no_audio_processing": False,
         "disable_particles": False,
         "disable_mouse": True,

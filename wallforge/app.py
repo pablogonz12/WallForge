@@ -530,6 +530,11 @@ class Window(Adw.ApplicationWindow):
                 self.cfg.save()
                 if sync and outputs:
                     theme.sync(self.cfg, it, outputs[0] if len(outputs) == 1 else None)
+                if self.cfg.data["engine"].get("preload_next", True) and not quiet:
+                    nxt = self._next_rotated(skip={it.id})
+                    if nxt:
+                        for o in outputs:
+                            engine.preload(self.cfg, nxt, o)
             except Exception as e:
                 err = str(e)
             GLib.idle_add(self._applied, it, outputs, quiet, err)
@@ -1219,6 +1224,12 @@ class Window(Adw.ApplicationWindow):
         g1 = g2
         switch("Disable particles", "disable_particles")
         spin("Render resolution (%)", "render_scale", 25, 100)
+        r_pre = Adw.SwitchRow(title="Preload the next wallpaper", active=e.get("preload_next", True),
+                              subtitle="Keeps the next wallpaper loaded behind the current one so switching is instant. "
+                                       "Costs its memory (GPU) until it is used; not available in background layer mode.")
+        r_pre.connect("notify::active", lambda rr, _p: (e.update(preload_next=rr.get_active()), self.cfg.save(),
+                                                        None if rr.get_active() else engine.stop_spare_all()))
+        g2.add(r_pre)
         switch("Reduce frame rate and resolution on battery", "reduce_on_battery")
         switch("Pause wallpapers on battery", "pause_on_battery")
         switch("Disable audio capture for visualisers", "no_audio_processing",

@@ -240,8 +240,32 @@ def was_native(output: str) -> bool:
         return False
 
 
+def _spare_file(output: str): return STATE / f"{output}.spare"
+
+
+def _layer_file(output: str): return STATE / f"{output}.layer"
+
+
+def current_layer(output: str) -> str:
+    """The layer the visible renderer actually sits on ("bottom" or "background")."""
+    try:
+        return _layer_file(output).read_text().strip() or "bottom"
+    except Exception:
+        return "bottom"
+
+
+def spare(output: str) -> dict | None:
+    """The preloaded-but-hidden renderer for this output: {"id", "pid"}, if it is still alive."""
+    try:
+        d = json.loads(_spare_file(output).read_text())
+        return d if Path(f"/proc/{int(d['pid'])}").exists() else None
+    except Exception:
+        return None
+
+
 def find_pids(output: str) -> list[int]:
     """Every engine process serving this output (ours or another launcher's), by /proc scan."""
+    hide = {int((spare(output) or {}).get("pid", -1))}
     res = []
     for p in Path("/proc").glob("[0-9]*"):
         try:
@@ -251,11 +275,78 @@ def find_pids(output: str) -> list[int]:
             args = (p / "cmdline").read_bytes().split(b"\0")
             for i, a in enumerate(args[:-1]):
                 if a in (b"--screen-root", b"-r", b"--output") and args[i + 1].decode(errors="replace") == output:
-                    res.append(int(p.name))
+                    if int(p.name) not in hide:
+                        res.append(int(p.name))
                     break
         except Exception:
             continue
     return res
+
+
+def preload(cfg, item: library.Item, output: str) -> bool:
+    """Load the wallpaper that will probably be next, on the layer below, so switching to it is one frame.
+
+    It only works from the default "bottom" layer: the spare sits on "background", invisible behind the current
+    wallpaper, and switching is then just stopping the current one. Costs the spare's VRAM until it is used.
+    """
+    e = cfg.data["engine"]
+    # The spare has to sit *below* the visible wallpaper, and only "bottom" has a layer under it.
+    if e.get("layer", "bottom") != "bottom" or current_layer(output) != "bottom":
+        return False
+    if item.kind == "web" or not use_native(cfg, item):
+        return False
+    cur = spare(output)
+    if cur and cur.get("id") == item.id:
+        return True
+    stop_spare(output)
+    ready = STATE / f"{output}.spare.ready"
+    ready.unlink(missing_ok=True)
+    args = build_native_args(cfg, item, output)
+    if "--layer" in args:
+        args[args.index("--layer") + 1] = "background"
+    args += ["--ready-file", str(ready)]
+    STATE.mkdir(parents=True, exist_ok=True)
+    log = open(STATE / f"{output}.spare.log", "w")
+    try:
+        p = subprocess.Popen(args, cwd=str(Path(args[0]).parent), env=dict(os.environ), stdout=log,
+                             stderr=subprocess.STDOUT, start_new_session=True)
+    except Exception:
+        return False
+    _spare_file(output).write_text(json.dumps({"id": item.id, "pid": p.pid, "ready": str(ready)}))
+    return True
+
+
+def stop_spare_all():
+    """Drop every preloaded wallpaper (the setting was turned off, or we are quitting)."""
+    for f in STATE.glob("*.spare"):
+        try:
+            os.kill(int(json.loads(f.read_text())["pid"]), signal.SIGTERM)
+        except Exception:
+            pass
+        f.unlink(missing_ok=True)
+
+
+def stop_spare(output: str):
+    sp = spare(output)
+    if sp:
+        try: os.kill(int(sp["pid"]), signal.SIGTERM)
+        except ProcessLookupError: pass
+    _spare_file(output).unlink(missing_ok=True)
+
+
+def promote(cfg, item: library.Item, output: str) -> bool:
+    """If the wanted wallpaper is already preloaded, retire the current renderer and make the spare the current one."""
+    sp = spare(output)
+    if not sp or sp.get("id") != item.id:
+        return False
+    pids = find_pids(output)
+    for pid in pids:
+        try: os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError: pass
+    _pidfile(output).write_text(str(sp["pid"]))
+    _layer_file(output).write_text("background")  # the promoted spare keeps the layer it was started on
+    _spare_file(output).unlink(missing_ok=True)
+    return True
 
 
 def running(output: str) -> int | None:
@@ -264,6 +355,7 @@ def running(output: str) -> int | None:
 
 
 def stop(output: str, wait: float = 3.0):
+    stop_spare(output)
     pids = find_pids(output)
     for pid in pids:
         try: os.kill(pid, signal.SIGTERM)
@@ -282,6 +374,8 @@ def start(cfg, item: library.Item, output: str, overrides: dict | None = None, l
     # Switching should look like a cut, not a black frame. Instead of killing the running wallpaper first, start the
     # new one, wait for its first presented frame (the renderer touches --ready-file), and only then retire the old
     # process. Web wallpapers are the exception: two WebKit layers on one output fight, so they stop first.
+    if not legacy and promote(cfg, item, output):
+        return int(_pidfile(output).read_text())
     prev = [] if legacy else [p for p in find_pids(output) if Path(f"/proc/{p}").exists()]
     web_item = use_web(item) and not legacy
     if not prev or web_item:
@@ -308,6 +402,7 @@ def start(cfg, item: library.Item, output: str, overrides: dict | None = None, l
     p = subprocess.Popen(args, cwd=str(eng_dir), env=dict(os.environ) if native else _env(eng_dir), stdout=log, stderr=subprocess.STDOUT,
                          start_new_session=True)
     _pidfile(output).write_text(str(p.pid))
+    _layer_file(output).write_text("background" if native and "--layer" in args and args[args.index("--layer") + 1] == "background" else "bottom")
     if prev and native:
         end = time.monotonic() + 2.0
         while time.monotonic() < end and not ready.exists() and p.poll() is None:
