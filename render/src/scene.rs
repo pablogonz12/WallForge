@@ -86,11 +86,18 @@ pub struct EffectRef { pub file: String, pub name: String, pub passes: Vec<PassO
 
 pub enum Kind { Image { model: String }, Particle { file: String }, Sound { files: Vec<String> }, Light, Group, Other(String) }
 
+/// WE `alignment`: which point of the layer the origin refers to; returns the quad centre offset in layer sizes.
+pub fn align_of(a: &str) -> [f32; 2] {
+    let a = a.to_ascii_lowercase();
+    [if a.contains("left") { 0.5 } else if a.contains("right") { -0.5 } else { 0.0 }, if a.contains("top") { -0.5 } else if a.contains("bottom") { 0.5 } else { 0.0 }]
+}
+
 pub struct Obj {
     pub id: i64, pub name: String, pub kind: Kind,
     pub origin: [f32; 3], pub scale: [f32; 3], pub angles: [f32; 3],
     pub size: Option<[f32; 2]>, pub alpha: f32, pub color: [f32; 3],
     pub parent: Option<i64>, pub effects: Vec<EffectRef>, pub blend: Option<String>,
+    pub align: [f32; 2], // quad centre offset from the origin in units of the layer size (alignment: top / left / topleft ...)
 }
 
 pub struct Scene {
@@ -150,6 +157,7 @@ pub fn parse(j: &Value, props: &Props) -> Result<Scene, String> {
             parent: o.get("parent").and_then(|v| v.as_i64()),
             effects,
             blend: o.get("colorBlendMode").and_then(|v| v.as_str()).map(String::from),
+            align: align_of(o.get("alignment").and_then(|v| v.as_str()).unwrap_or("center")),
         });
     }
     Ok(Scene { width, height, clear, objects, fatal, warnings })

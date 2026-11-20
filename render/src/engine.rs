@@ -209,6 +209,7 @@ impl Engine {
             self.vram += gt.bytes;
             if std::env::var("WF_DBG").is_ok() { eprintln!("vram: layer '{name}' tex {:.1} MiB ({}x{}) px {:?}", gt.bytes as f64 / 1048576.0, gt.w, gt.h, px); }
             let world = world_of(&self.scene.objects, i, 0);
+            let world = { let al = self.scene.objects[i].align; if al == [0.0, 0.0] { world } else { scene::mul(&world, &scene::trs([al[0] * size[0], al[1] * size[1], 0.0], [1.0; 3], 0.0)) } };
             let mut layer = Layer { name: name.clone(), tex: gt.id, size, world, color, alpha, uvs: gt.uv, frames, tex_wh, full, blend: blend_of(blend_o.as_deref().unwrap_or(&def.material.blending)),
                 passes: vec![], ping: None, named: HashMap::new(), px };
             if def.material.blending == "additive" { layer.blend = Blend::Additive; }
@@ -457,8 +458,21 @@ impl Engine {
                 res.push(r);
                 unsafe { gl::ActiveTexture(gl::TEXTURE0 + unit as u32); gl::BindTexture(gl::TEXTURE_2D, id); }
             }
-            for (u, lc) in &p.uniforms { self.set_uniform(u, *lc, p, &ident, t, &res); }
+            // vertex-displacing effects (foliagesway, ...) work in scene units: give them a quad of the layer's size and a matching MVP
+            let pix = p.uniforms.iter().any(|(u, _)| u.name == "g_ModelViewProjectionMatrix") && l.size[0] > 0.0 && l.size[1] > 0.0;
+            let mut emvp = ident;
+            if pix {
+                let (hw, hh) = (l.size[0] * 0.5, l.size[1] * 0.5);
+                let v: [f32; 20] = [-hw, -hh, 0.0, 0.0, 0.0, hw, -hh, 0.0, 1.0, 0.0, -hw, hh, 0.0, 0.0, 1.0, hw, hh, 0.0, 1.0, 1.0];
+                emvp[0] = 1.0 / hw; emvp[5] = 1.0 / hh;
+                unsafe { let mut vb = 0; gl::GetVertexAttribiv(0, gl::VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &mut vb); gl::BindBuffer(gl::ARRAY_BUFFER, vb as u32); gl::BufferSubData(gl::ARRAY_BUFFER, 0, 80, v.as_ptr() as *const _); }
+            }
+            for (u, lc) in &p.uniforms { self.set_uniform(u, *lc, p, &emvp, t, &res); }
             unsafe { gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4); }
+            if pix {
+                let v: [f32; 20] = [-1.0, -1.0, 0.0, 0.0, 0.0, 1.0, -1.0, 0.0, 1.0, 0.0, -1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0];
+                unsafe { gl::BufferSubData(gl::ARRAY_BUFFER, 0, 80, v.as_ptr() as *const _); }
+            }
             if p.target.is_none() { cur = (cur.1, cur.0); dbg_last = None; } else { dbg_last = Some(dst.tex); }
         }
         if let Some(t) = dbg_last { return t; }
