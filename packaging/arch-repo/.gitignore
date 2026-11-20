@@ -1,0 +1,9 @@
+src/
+pkg/
+*.pkg.tar.zst
+*.db
+*.db.tar.zst
+*.files
+*.files.tar.zst
+*.db.sig
+.commit

@@ -1,4 +1,7 @@
+import os
+import tempfile
 import unittest
+from pathlib import Path
 
 from wallforge import doctor
 
@@ -24,6 +27,32 @@ class ReportTests(unittest.TestCase):
         text, _ = doctor.report([(doctor.OK, "a", "x"), (doctor.OK, "longer label", "y")])
         rows = [line for line in text.splitlines() if " x" in line or " y" in line]
         self.assertEqual(len({line.index("x") if line.endswith("x") else line.index("y") for line in rows}), 1)
+
+
+class LastRunTests(unittest.TestCase):
+    def _with_log(self, text: str):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "wallforge").mkdir()
+            (Path(d) / "wallforge" / "DP-1.log").write_text(text)
+            old = os.environ.get("XDG_RUNTIME_DIR")
+            os.environ["XDG_RUNTIME_DIR"] = d
+            try:
+                return doctor.checks()
+            finally:
+                if old is None:
+                    os.environ.pop("XDG_RUNTIME_DIR", None)
+                else:
+                    os.environ["XDG_RUNTIME_DIR"] = old
+
+    def test_a_log_from_a_crashed_run_is_a_warning_not_a_crash(self):
+        entries = self._with_log("starting\nwallforge-render: panic: boom\n")
+        self.assertTrue(all(len(e) == 3 for e in entries), entries)
+        self.assertIn("last run", [label for _, label, _ in entries])
+        self.assertEqual(doctor.report(entries)[1], 0)
+
+    def test_an_empty_log_dir_adds_nothing(self):
+        entries = self._with_log("")
+        self.assertTrue(all(len(e) == 3 for e in entries), entries)
 
 
 class ChecksTests(unittest.TestCase):

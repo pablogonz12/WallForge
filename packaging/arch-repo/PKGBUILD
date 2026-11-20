@@ -1,0 +1,55 @@
+# Maintainer: pgm1207 <pgm1207@users.noreply.github.com>
+# Release package for the GitHub pacman repository (see .github/workflows/arch-repo.yml).
+# The -git package for the AUR lives in ../aur.
+pkgname=wallforge
+pkgver=0.6.0
+pkgrel=1
+pkgdesc='Wallpaper Engine wallpapers on Wayland: native renderer for video, scene and web wallpapers, library, Workshop browser'
+arch=('x86_64' 'aarch64')
+url='https://github.com/pgm1207/WallForge'
+license=('MIT')
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'python-pillow' 'python-aiohttp' 'ffmpeg' 'libva' 'libglvnd')
+makedepends=('git' 'rust' 'clang' 'pkgconf')
+optdepends=('webkitgtk-6.0: web wallpapers'
+            'gtk4-layer-shell: web wallpapers'
+            'steam: subscribe to Workshop wallpapers and fetch Wallpaper Engine assets'
+            'matugen: palette sync'
+            'wallust: palette sync'
+            'python-pywal: palette sync')
+conflicts=('wallforge-git')
+source=()
+sha256sums=()
+
+prepare() {
+  # No source tarball: package the checkout the workflow built from, so the release tag and the
+  # package contents are the same tree.
+  mkdir -p wallforge
+  git -C "$startdir/../.." archive --format=tar HEAD | tar -x -C wallforge
+  git -C "$startdir/../.." rev-parse HEAD > .commit
+}
+
+build() {
+  cd wallforge/render
+  cargo build --release --locked
+}
+
+package() {
+  cd wallforge
+  install -d "$pkgdir/usr/lib/$pkgname"
+  cp -r wallforge "$pkgdir/usr/lib/$pkgname/"
+  find "$pkgdir/usr/lib/$pkgname" -name __pycache__ -prune -exec rm -rf {} +
+  printf 'COMMIT = "%s"\n' "$(cat "$srcdir/.commit")" > "$pkgdir/usr/lib/$pkgname/wallforge/_build.py"
+
+  install -Dm755 render/target/release/wallforge-render "$pkgdir/usr/lib/$pkgname/wallforge-render"
+
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/wallforge" <<'WRAP'
+#!/bin/sh
+exec env PYTHONPATH=/usr/lib/wallforge python3 -m wallforge "$@"
+WRAP
+
+  sed 's|@EXEC@|wallforge|' data/dev.wallforge.Wallforge.desktop.in |
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/dev.wallforge.Wallforge.desktop"
+  install -Dm644 assets/wallforge.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/dev.wallforge.Wallforge.svg"
+  install -Dm644 assets/wallforge-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/dev.wallforge.Wallforge-symbolic.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

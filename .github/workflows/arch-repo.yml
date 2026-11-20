@@ -1,0 +1,76 @@
+name: Arch repo
+
+# Publishes a pacman repository to the gh-pages branch on every release:
+#   https://pgm1207.github.io/WallForge/arch/x86_64
+# The AUR package (packaging/aur) is separate and pushed by hand.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to package (empty = the latest tag in the checkout)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install build tools
+        run: pacman -Syu --noconfirm --needed git rust clang ffmpeg libva libglvnd pkgconf
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Work out the version
+        id: ver
+        run: |
+          tag="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          if [ -z "$tag" ]; then tag=$(git describe --tags --abbrev=0); fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ver=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the package
+        run: |
+          set -euo pipefail
+          sed -i "s/^pkgver=.*/pkgver=${{ steps.ver.outputs.ver }}/" packaging/arch-repo/PKGBUILD
+          useradd -m builder
+          chown -R builder "$GITHUB_WORKSPACE"
+          # --nodeps: the runtime GTK/Python dependencies are not needed to build, and makepkg would
+          # otherwise refuse to run because they are not installed in this container.
+          su builder -c "cd '$GITHUB_WORKSPACE/packaging/arch-repo' && makepkg -f --nodeps --noconfirm"
+          ls -l packaging/arch-repo/*.pkg.tar.zst
+
+      - name: Publish to gh-pages
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          url="https://x-access-token:${TOKEN}@github.com/${REPO}.git"
+          rm -rf /tmp/pages
+          if ! git clone --depth 1 --branch gh-pages "$url" /tmp/pages 2>/dev/null; then
+            git init -q /tmp/pages
+            git -C /tmp/pages checkout -q -b gh-pages
+            git -C /tmp/pages remote add origin "$url"
+          fi
+          mkdir -p /tmp/pages/arch/x86_64
+          cp packaging/arch-repo/*.pkg.tar.zst /tmp/pages/arch/x86_64/
+          cp packaging/arch-repo/index.html /tmp/pages/index.html
+          cp packaging/arch-repo/wallforge.conf /tmp/pages/arch/wallforge.conf
+          cd /tmp/pages/arch/x86_64
+          # keep a short history of packages; the database only needs the newest of each
+          ls -1t wallforge-*.pkg.tar.zst | tail -n +4 | xargs -r rm -f
+          repo-add --nocolor --remove --verify wallforge.db.tar.zst wallforge-*.pkg.tar.zst 2>/dev/null ||
+            repo-add --nocolor --remove wallforge.db.tar.zst wallforge-*.pkg.tar.zst
+          cd /tmp/pages
+          git add -A
+          git -c user.name="WallForge CI" -c user.email="noreply@github.com" commit -q -m "arch: $TAG"
+          git push -q origin gh-pages

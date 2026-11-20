@@ -117,7 +117,7 @@ def _config() -> tuple[str, str, dict]:
     return OK, f"v{ver} at {CONFIG_FILE}", raw
 
 
-def _previous_run() -> tuple[str, str] | None:
+def _previous_run() -> tuple[str, str, str] | None:
     """A renderer that died last time leaves a trace in its log; surface it instead of making people hunt."""
     d = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "wallforge"
     logs = sorted(d.glob("*.log")) if d.is_dir() else []
@@ -129,8 +129,8 @@ def _previous_run() -> tuple[str, str] | None:
     except Exception:
         return None
     if any(k in tail.lower() for k in ("panic", "error", "failed", "skipping", "not found")):
-        return WARN, f"last run: {last.name} ends with: {tail[:160]}"
-    return OK, f"last run: {last.name} ends cleanly"
+        return WARN, "last run", f"{last.name} ends with: {tail[:160]}"
+    return OK, "last run", f"{last.name} ends cleanly"
 
 
 def checks() -> list[tuple[str, str, str]]:

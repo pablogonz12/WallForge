@@ -159,10 +159,29 @@ cd WallForge
 ./wallforge.sh
 ```
 
+### Arch binary repository
+
+Every release is packaged and published to a pacman repository, so Arch and CachyOS can install and update it with
+pacman:
+
+```bash
+sudo tee /etc/pacman.d/wallforge.conf >/dev/null <<'EOF'
+[wallforge]
+SigLevel = Optional
+Server = https://pgm1207.github.io/WallForge/arch/x86_64
+EOF
+grep -q wallforge.conf /etc/pacman.conf || echo 'Include = /etc/pacman.d/wallforge.conf' | sudo tee -a /etc/pacman.conf
+sudo pacman -Sy wallforge
+```
+
+Those packages are unsigned and the repository sets `SigLevel = Optional`; if you sign your own repositories, build
+from source instead. What is published, and how it is built, is in
+[`packaging/arch-repo/`](packaging/arch-repo).
+
 ### AUR
 
-A `wallforge-git` PKGBUILD is in [`packaging/aur/`](packaging/aur). It is not published on the AUR yet; build it
-with `makepkg -si` from that folder.
+A `wallforge-git` PKGBUILD is in [`packaging/aur/`](packaging/aur). It is not on the AUR yet (the AUR pauses new
+registrations from time to time); build it with `makepkg -si` from that folder in the meantime.
 
 ## Share a wallpaper
 
