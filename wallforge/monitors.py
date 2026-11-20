@@ -55,8 +55,7 @@ def _wlr():
 
 def _mutter():
     """GNOME: connectors and logical sizes from org.gnome.Mutter.DisplayConfig."""
-    import gi
-    from gi.repository import Gio, GLib
+    from gi.repository import Gio
     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     r = bus.call_sync("org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig", "org.gnome.Mutter.DisplayConfig",
                       "GetCurrentState", None, None, Gio.DBusCallFlags.NONE, 3000, None).unpack()

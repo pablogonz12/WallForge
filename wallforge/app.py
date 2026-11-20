@@ -24,19 +24,19 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 from . import (  # noqa: E402
     __version__,  # noqa: E402
     assets,
+    commons,
     config,
     engine,
     gnomeext,
+    importer,
     library,
     monitors,
     paths,
     rotation,
     theme,
-    updater,
-    commons,
-    importer,
-    weimport,
     uninstall,
+    updater,
+    weimport,
     workshop,
 )
 from .props import PropertyEditor  # noqa: E402
