@@ -16,6 +16,10 @@
 
 ### Changed
 
+- **Instant wallpaper switching**: the new renderer is started before the old one is stopped and the old wallpaper
+  stays on screen until the new one presents its first frame (110–160 ms for most scenes), so switching is a cut
+  instead of a black flash. The renderer gained `--ready-file` for this; web wallpapers still replace each other
+  directly.
 - **KDE Plasma 6.7+** implements `wlr-layer-shell`, so WallForge draws there; the docs, the FAQ, `--doctor` and the
   renderer's error messages now say so. A compositor without layer-shell (GNOME Shell) gets an explanation and a
   pointer to the tracking issue instead of a protocol bind error.

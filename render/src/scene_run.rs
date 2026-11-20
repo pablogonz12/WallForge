@@ -64,12 +64,19 @@ pub fn run(args: Args) {
         libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
     }
 
+    let ready_file = args.ready_file.clone();
     let conn = Connection::connect_to_env().unwrap_or_else(|e| { eprintln!("wayland connect: {e}"); std::process::exit(1) });
     let (globals, mut queue) = registry_queue_init::<App>(&conn).expect("registry");
     let qh = queue.handle();
-    let mut app = App { outputs: vec![], configured: false, closed: false, size: (0, 0), resized: false, cb_ready: true, frac: 0 };
+    let mut app = App { outputs: vec![], configured: false, closed: false, size: (0, 0), resized: false, cb_ready: true, ready_file, frac: 0 };
     let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=6, ()).expect("wl_compositor");
-    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = globals.bind(&qh, 1..=4, ()).expect("zwlr_layer_shell_v1 (compositor lacks layer-shell)");
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = match globals.bind(&qh, 1..=4, ()) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("wallforge-render: this compositor does not implement wlr-layer-shell, so a wallpaper cannot be placed behind your windows.");
+            std::process::exit(2);
+        }
+    };
     let outs: Vec<(u32, u32)> = globals.contents().with_list(|l| l.iter().filter(|g| g.interface == "wl_output").map(|g| (g.name, g.version)).collect());
     for (name, ver) in outs {
         let o = globals.registry().bind::<wl_output::WlOutput, _, _>(name, ver.min(4), &qh, ());
@@ -175,6 +182,7 @@ pub fn run(args: Args) {
             engine.draw();
             unsafe { eglSwapBuffers(dpy, esurf); }
             dirty = false; shown += 1;
+            if shown == 1 { if let Some(r) = &app.ready_file { let _ = std::fs::write(r, "1"); } }
             next_due = if next_due + period < now { now + period } else { next_due + period };
         }
         if let Err(e) = conn.flush() { eprintln!("wallforge-render: lost connection to the compositor ({e}); exiting"); break; }

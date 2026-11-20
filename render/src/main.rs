@@ -73,6 +73,7 @@ struct Args {
     shot_size: (i32, i32),
     shot_time: f32,
     scale: u32,
+    ready_file: Option<String>,
 }
 
 fn usage() -> ! {
@@ -83,7 +84,7 @@ fn usage() -> ! {
 
 fn parse_args() -> Args {
     let mut a = Args { output: String::new(), bg: PathBuf::new(), scaling: Scaling::Fill, fps: 30.0,
-        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false, check: false, assets_dir: None, props: vec![], make_test: None, screenshot: None, shot_size: (1920, 1080), shot_time: 0.0, scale: 100 };
+        layer: zwlr_layer_shell_v1::Layer::Background, duration: None, force_sw: false, volume: 100, silent: false, check: false, assets_dir: None, props: vec![], make_test: None, screenshot: None, ready_file: None, shot_size: (1920, 1080), shot_time: 0.0, scale: 100 };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| usage());
@@ -103,6 +104,7 @@ fn parse_args() -> Args {
             "--software" => a.force_sw = true,
             "--disable-particles" => particles::DISABLED.store(true, Ordering::Relaxed),
             "--assets-dir" => a.assets_dir = Some(PathBuf::from(val())),
+            "--ready-file" => a.ready_file = Some(val()),
             "--set-property" => { let v = val(); match v.split_once('=') { Some((k, x)) => a.props.push((k.to_string(), x.to_string())), None => usage() } }
             "--screenshot" => a.screenshot = Some(PathBuf::from(val())),
             "--screenshot-size" => { let v = val(); match v.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))) { Some(s) => a.shot_size = s, None => usage() } }
@@ -135,6 +137,7 @@ struct App {
     size: (i32, i32),
     resized: bool,
     cb_ready: bool,
+    ready_file: Option<String>,
     frac: u32, // preferred fractional scale in 1/120 (0 = unknown)
 }
 
@@ -255,7 +258,7 @@ fn main() {
     let conn = Connection::connect_to_env().unwrap_or_else(|e| { eprintln!("wayland connect: {e}"); std::process::exit(1) });
     let (globals, mut queue) = registry_queue_init::<App>(&conn).expect("registry");
     let qh = queue.handle();
-    let mut app = App { outputs: vec![], configured: false, closed: false, size: (0, 0), resized: false, cb_ready: true, frac: 0 };
+    let mut app = App { outputs: vec![], configured: false, closed: false, size: (0, 0), resized: false, cb_ready: true, ready_file: args.ready_file.clone(), frac: 0 };
     let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=6, ()).expect("wl_compositor");
     // Layer-shell is how a wallpaper gets attached behind every window. GNOME Shell does not implement it,
     // so say what is wrong and what to do instead of dying with a protocol bind error.
@@ -433,7 +436,7 @@ fn main() {
                 dirty = false;
                 if dbg && changed { let g = last_present.elapsed(); if g > period * 2 { eprintln!("wallforge-render: present gap {:.1} ms", g.as_secs_f64() * 1e3); } }
                 last_present = Instant::now();
-                if first { first = false; if dbg { eprintln!("wallforge-render: first frame {:.0} ms after start", t_proc.elapsed().as_secs_f64() * 1e3); } base_wall = Instant::now(); base_pts = ring.back().map(|f| f.pts).unwrap_or(0.0); next_slot = base_wall; }
+                if first { first = false; if let Some(r) = &app.ready_file { let _ = std::fs::write(r, "1"); } if dbg { eprintln!("wallforge-render: first frame {:.0} ms after start", t_proc.elapsed().as_secs_f64() * 1e3); } base_wall = Instant::now(); base_pts = ring.back().map(|f| f.pts).unwrap_or(0.0); next_slot = base_wall; }
             }
             // next wake: the cap grid, but no earlier than the next video frame is actually due
             next_slot += period;

@@ -279,7 +279,15 @@ def stop(output: str, wait: float = 3.0):
 
 
 def start(cfg, item: library.Item, output: str, overrides: dict | None = None, legacy: bool = False) -> int:
-    stop(output)
+    # Switching should look like a cut, not a black frame. Instead of killing the running wallpaper first, start the
+    # new one, wait for its first presented frame (the renderer touches --ready-file), and only then retire the old
+    # process. Web wallpapers are the exception: two WebKit layers on one output fight, so they stop first.
+    prev = [] if legacy else [p for p in find_pids(output) if Path(f"/proc/{p}").exists()]
+    web_item = use_web(item) and not legacy
+    if not prev or web_item:
+        stop(output)
+    ready = STATE / f"{output}.ready"
+    ready.unlink(missing_ok=True)
     STATE.mkdir(parents=True, exist_ok=True)
     web = use_web(item) and not legacy
     native = not web and use_native(cfg, item) and not legacy
@@ -294,10 +302,19 @@ def start(cfg, item: library.Item, output: str, overrides: dict | None = None, l
         _pidfile(output).write_text(str(p.pid))
         return p.pid
     args = build_native_args(cfg, item, output, overrides) if native else build_args(cfg, item, output, overrides)
+    if native:
+        args += ["--ready-file", str(ready)]
     eng_dir = Path(args[0]).parent
     p = subprocess.Popen(args, cwd=str(eng_dir), env=dict(os.environ) if native else _env(eng_dir), stdout=log, stderr=subprocess.STDOUT,
                          start_new_session=True)
     _pidfile(output).write_text(str(p.pid))
+    if prev and native:
+        end = time.monotonic() + 2.0
+        while time.monotonic() < end and not ready.exists() and p.poll() is None:
+            time.sleep(0.02)
+        for q in prev:
+            try: os.kill(q, signal.SIGTERM)
+            except ProcessLookupError: pass
     return p.pid
 
 
