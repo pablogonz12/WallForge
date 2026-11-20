@@ -37,7 +37,7 @@ not listed here, please [report it](troubleshooting.md#reporting-a-wallpaper-tha
 | GIF-template scenes (one animated sprite sheet filling the screen) | Yes |
 | Embedded video layers | Yes (their sound is not played) |
 | Particle systems | Sprites with the common emitters, initializers and operators. Trails and ropes draw as plain sprites; control points, child systems and vortex forces are ignored |
-| Text layers | Yes. Texts driven by a clock or date script show the current time; other scripted texts show their starting value |
+| Text layers | Yes. Texts driven by a clock or date script show the current time; other scripted texts show their starting value. Date/time `format` patterns (`%A`, `{year}`, Cafe-style `dd MMM yyyy`) are expanded; a missing custom font is reported in the log. Wallpaper Engine's `padding` (extra glyph geometry for text effects) is not applied |
 | User properties (everything in the wallpaper's settings panel) | Yes, including image slots |
 | Property-bound visibility | Yes for plain bindings and simple show/hide scripts |
 | SceneScript (general scripting) | No. Scripted motion and logic stay at their starting state |
