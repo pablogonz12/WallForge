@@ -3,6 +3,21 @@
 Bug reports and fixes are welcome. The most useful reports are scene wallpapers that render differently from
 Wallpaper Engine; see [Reporting a wallpaper](docs/troubleshooting.md#reporting-a-wallpaper-that-renders-wrongly).
 
+## Where to start
+
+- Issues labelled [good first issue](https://github.com/pgm1207/WallForge/issues?q=is%3Aopen+label%3A%22good+first+issue%22)
+  name the file and the acceptance criteria. Comment on one to claim it.
+- Questions and ideas go to [Discussions](https://github.com/pgm1207/WallForge/discussions), bugs to issues.
+- Testing on a compositor or GPU you have, and reporting what you see, is a real contribution.
+
+## Quick check before a pull request
+
+```bash
+python3 -m unittest discover -s tests          # Python tests, no display needed
+pip install ruff && ruff check wallforge tests # lint
+cd render && cargo build --release && cargo test --release
+```
+
 ## Layout
 
 | Path | What |

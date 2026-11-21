@@ -33,6 +33,10 @@ sudo pacman -Sy wallforge && wallforge
 Everywhere else, [build from source](#from-source): it takes about a minute of compiling. You need to own Wallpaper
 Engine on Steam for the Workshop library and its shared assets; WallForge never ships or redistributes its files.
 
+**Works on:** niri (tested), KDE Plasma on KWin 6.8 (tested), GNOME Shell 51 via the bundled extension (tested, video
+wallpapers). Hyprland, Sway, river, Wayfire and labwc should work through `wlr-layer-shell` but are not tested yet:
+[reports welcome](https://github.com/pgm1207/WallForge/issues?q=is%3Aopen+label%3A%22good+first+issue%22). Wayland only.
+
 **Contents** · [Why](#why-wallforge) · [What it plays](#what-it-plays) · [Screenshots](#screenshots) ·
 [Performance](#performance) · [Rotation](#rotation) · [Features](#features) · [Install](#install) ·
 [FAQ](#faq) · [Roadmap](#roadmap) · [Troubleshooting](#when-a-wallpaper-looks-wrong) · [Documentation](#more-documentation)
@@ -317,7 +321,7 @@ the wallpaper's `project.json`, `scene.json` and its shaders, and draws them wit
 
 **Will it work on GNOME or KDE?** KDE Plasma: yes, KWin has implemented `wlr-layer-shell` since Plasma 5.20 (tested on
 KWin 6.8). GNOME 45+: yes, through the bundled shell extension, because GNOME has no layer-shell (tested on GNOME Shell
-51 with video wallpapers; web wallpapers do not work there yet). See [the table above](#requirements).
+51 with video wallpapers; web wallpapers do not work there yet). See [the table above](#what-you-need).
 
 **Why is SceneScript not supported?** Scenes that ship a script (scripted camera moves, media panels, sequences) run
 only part of their logic here; the picture still appears, but it can be incomplete. It is the largest remaining gap
@@ -357,8 +361,10 @@ What is next, roughly in order. Each item has an issue; a thumbs-up there is how
 - [**Bloom and HDR**](https://github.com/pgm1207/WallForge/issues/5) post-processing matching Wallpaper Engine's look.
 - [**More packages**](https://github.com/pgm1207/WallForge/issues/6): AUR (waiting on AUR registration), Flatpak, Fedora COPR.
 
-Contributions are welcome, from a Workshop link that renders wrong to a renderer fix; [CONTRIBUTING.md](CONTRIBUTING.md)
-shows how to test a change against your whole library in one command.
+Smaller tasks that fit a first contribution are labelled
+[good first issue](https://github.com/pgm1207/WallForge/issues?q=is%3Aopen+label%3A%22good+first+issue%22). No dates are
+promised. Contributions are welcome, from a Workshop link that renders wrong to a renderer fix;
+[CONTRIBUTING.md](CONTRIBUTING.md) shows how to build, test and where to start.
 
 ## More documentation
 
