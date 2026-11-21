@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Wallpapers now reliably come back at every login.** `wallforge --daemon` is a small session supervisor (single
+  instance, no GTK, ~0.3% of a core idle). It starts every saved output in parallel, restarts a renderer that crashes
+  (backoff, gives up after 5 crashes a minute), follows monitor hotplug, retries outputs that were not ready yet, and
+  never resurrects a wallpaper you stopped. Log: `~/.local/state/wallforge/daemon.log`.
+- **Starts everywhere**: *Restore wallpapers at login* (now on by default; existing users with saved wallpapers are
+  switched on once) enables a systemd user unit (`wallforge.service`), the XDG autostart entry, and on niri a
+  `spawn-at-startup` line in the managed `wallforge.kdl`. Hyprland and sway without systemd get the exact line to add
+  in Settings and `--doctor`, which now reports each mechanism.
+- **Docks that renumber connectors** (DP-3/DP-5 after a reboot) no longer lose assignments: monitors are saved with
+  their make/model/serial and matched by identity when the connector name changes.
+- **Stacking guard** (niri, Hyprland): when another wallpaper client (Noctalia, swaybg, ...) creates its surface after
+  ours and covers it, WallForge recreates its own on top, gaplessly.
+- Packages ship `wallforge.service`.
 - **niri**: Settings > Desktop > "Fill the niri overview" shows the live wallpaper behind niri's overview (one wallpaper behind
   the workspace cards) by managing `~/.config/niri/wallforge.kdl`; on by default.
 

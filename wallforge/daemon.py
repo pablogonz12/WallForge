@@ -1,0 +1,339 @@
+"""``wallforge --daemon``: the session supervisor that makes wallpapers come back at every login.
+
+It follows config.json (the truth) and the compositor's outputs:
+  * starts every assigned output in parallel, adopts renderers that already run (GUI-started, or before a daemon restart)
+  * matches assignments by connector *and* monitor identity, so docks that renumber DP-3/DP-5 do not lose them
+  * restarts a crashed renderer with backoff, retries outputs that were not ready yet, follows hotplug
+  * stacking guard (niri, Hyprland): if another client's background surface (Noctalia, swaybg, ...) got created after ours
+    and hides it, recreate ours on top
+It never resurrects an output the user stopped in the GUI, and it holds a lock, so any number of autostart mechanisms
+can start it. Light imports only: no GTK/Adw unless the Gdk fallback is needed to list monitors.
+"""
+from __future__ import annotations
+
+import fcntl
+import glob
+import json
+import logging
+import logging.handlers
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from . import config, engine, library, monitors
+
+log = logging.getLogger("wallforge.daemon")
+RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
+LOCK = engine.STATE / "daemon.lock"
+FAST, SLOW = 0.5, 5.0  # tick seconds: right after a start or change, and when idle
+FAST_FOR = 45.0
+CRASH_LIMIT, CRASH_WINDOW, GIVE_UP_FOR = 5, 60.0, 600.0
+GUARD_GAP, GUARD_LIMIT, GUARD_WINDOW = 15.0, 6, 600.0
+WAIT_DISPLAY = 120.0
+
+_lock_fh = None
+
+
+# ---------------------------------------------------------------- single instance
+def acquire_lock() -> bool:
+    global _lock_fh
+    engine.STATE.mkdir(parents=True, exist_ok=True)
+    fh = open(LOCK, "a+")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return False
+    fh.seek(0)
+    fh.truncate()
+    fh.write(str(os.getpid()))
+    fh.flush()
+    _lock_fh = fh
+    return True
+
+
+def running_pid() -> int | None:
+    """PID of the daemon, or None when no daemon holds the lock."""
+    try:
+        fh = open(LOCK, "a+")
+    except OSError:
+        return None
+    try:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            fh.seek(0)
+            try:
+                return int(fh.read().strip() or 0) or -1
+            except ValueError:
+                return -1
+        fcntl.flock(fh, fcntl.LOCK_UN)
+        return None
+    finally:
+        fh.close()
+
+
+# ---------------------------------------------------------------- environment (units may start before the session env is imported)
+def discover_env():
+    """Fill in the compositor sockets when the daemon was started without a full session environment."""
+    if not os.environ.get("XDG_RUNTIME_DIR"):
+        os.environ["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+    rt = os.environ["XDG_RUNTIME_DIR"]
+    if not os.environ.get("WAYLAND_DISPLAY"):
+        socks = sorted(p for p in glob.glob(f"{rt}/wayland-*") if not p.endswith(".lock"))
+        if socks:
+            os.environ["WAYLAND_DISPLAY"] = os.path.basename(socks[0])
+    if not os.environ.get("NIRI_SOCKET"):
+        socks = sorted(glob.glob(f"{rt}/niri.*.sock"))
+        if socks:
+            os.environ["NIRI_SOCKET"] = socks[-1]
+    if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        inst = sorted(glob.glob(f"{rt}/hypr/*/.socket.sock"))
+        if inst:
+            os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = os.path.basename(os.path.dirname(inst[-1]))
+    if not os.environ.get("SWAYSOCK"):
+        socks = sorted(glob.glob(f"{rt}/sway-ipc.*.sock"))
+        if socks:
+            os.environ["SWAYSOCK"] = socks[-1]
+
+
+# ---------------------------------------------------------------- identity matching (pure)
+def resolve(saved: dict, live: list[dict]) -> tuple[dict, dict]:
+    """Match saved assignments {connector: {"id", "ident"?}} to the live outputs [{"name", "ident"}].
+
+    Connector first, provided the identity agrees (or one side has none); the rest by identity. Each saved entry and each
+    output is used at most once. Returns ({live name: saved entry}, saved dict re-keyed to the live names with idents
+    filled in). Entries that match nothing are kept as they are, so an unplugged monitor keeps its wallpaper."""
+    entries = {k: dict(v) for k, v in saved.items() if isinstance(v, dict)}
+    match: dict[str, str] = {}  # live name -> saved key
+    taken: set[str] = set()
+    for o in live:
+        e = entries.get(o["name"])
+        if e is not None and (not e.get("ident") or not o.get("ident") or e["ident"] == o["ident"]):
+            match[o["name"]] = o["name"]
+            taken.add(o["name"])
+    for o in live:
+        if o["name"] in match or not o.get("ident"):
+            continue
+        for k, e in entries.items():
+            if k not in taken and e.get("ident") == o["ident"]:
+                match[o["name"]] = k
+                taken.add(k)
+                break
+    out = {}
+    for o in live:
+        k = match.get(o["name"])
+        if k is not None:
+            e = entries[k]
+            if o.get("ident"):
+                e["ident"] = o["ident"]
+            out[o["name"]] = e
+    for k, e in entries.items():
+        if k not in taken and k not in out:  # unplugged: keep, unless its name is now someone else's
+            out[k] = e
+    return {n: entries[k] for n, k in match.items()}, out
+
+
+# ---------------------------------------------------------------- stacking guard
+def layers_snapshot() -> list[tuple[str, str, str]] | None:
+    """[(namespace, output, layer)] in stacking order (later = above), or None where the compositor has no layer IPC."""
+    try:
+        if os.environ.get("NIRI_SOCKET") and shutil.which("niri"):
+            r = subprocess.run(["niri", "msg", "-j", "layers"], capture_output=True, text=True, timeout=3)
+            return [(x.get("namespace", ""), x.get("output", ""), x.get("layer", "")) for x in json.loads(r.stdout)]
+        if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") and shutil.which("hyprctl"):
+            r = subprocess.run(["hyprctl", "-j", "layers"], capture_output=True, text=True, timeout=3)
+            names = {"0": "Background", "1": "Bottom", "2": "Top", "3": "Overlay"}
+            res = []
+            for out, v in json.loads(r.stdout).items():
+                for lvl, lst in (v.get("levels") or {}).items():
+                    res += [(x.get("namespace", ""), out, names.get(str(lvl), str(lvl))) for x in lst]
+            return res
+    except Exception as e:
+        log.debug("layer snapshot failed: %s", e)
+    return None
+
+
+def covered(layers: list[tuple[str, str, str]], output: str) -> str:
+    """Namespace of a foreign background surface stacked above ours on this output, else ''."""
+    bg = [ns for ns, out, layer in layers if out == output and layer.lower() == "background"]
+    ours = [i for i, ns in enumerate(bg) if ns == "wallforge"]
+    if not ours:
+        return ""
+    return next((ns for ns in bg[ours[-1] + 1:] if not ns.startswith("wallforge")), "")
+
+
+# ---------------------------------------------------------------- supervisor
+class Supervisor:
+    """All decisions live here; ``tick`` is called with the current facts so tests can drive it with a fake engine."""
+
+    def __init__(self, eng=engine, clock=time.monotonic):
+        self.eng, self.now = eng, clock
+        self.starts: dict[str, list[float]] = {}  # output -> recent start times
+        self.next_try: dict[str, float] = {}
+        self.gave_up: dict[str, float] = {}  # output -> retry-after
+        self.recreated: dict[str, list[float]] = {}
+        self.guard_off: dict[str, float] = {}
+        self.began: dict[str, float] = {}  # output -> last start, the guard waits for the surface to appear
+        self.items: dict[str, library.Item] = {}
+        self._scanned = -1e9
+        self.busy_until = 0.0  # fast ticking until
+
+    def _item(self, iid: str):
+        it = self.items.get(iid)
+        if it is None and self.now() - self._scanned > 30:  # unknown id: the library may have changed
+            self.items = {i.id: i for i in library.scan()}
+            self._scanned = self.now()
+            it = self.items.get(iid)
+        return it
+
+    def _start(self, cfg, name: str, iid: str, why: str) -> bool:
+        it = self._item(iid)
+        if not it or it.broken:
+            return False
+        try:
+            self.eng.start(cfg, it, name)
+        except Exception as e:
+            log.warning("%s: start failed: %s", name, e)
+            return False
+        self.began[name] = self.now()
+        self.busy_until = self.now() + FAST_FOR
+        log.info("%s: started %s (%s)", name, iid, why)
+        return True
+
+    def tick(self, cfg, live: list[dict], layers) -> None:
+        now = self.now()
+        saved = cfg.data.get("outputs", {})
+        match, _ = resolve(saved, live)
+        paused = self.eng.pause_for_battery(cfg)
+        for o in live:
+            name = o["name"]
+            e = match.get(name)
+            iid = (e or {}).get("id")
+            if not iid or paused or self.eng.is_stopped(name):
+                continue
+            if not self.eng.alive_fast(name):
+                if now < self.gave_up.get(name, 0) or now < self.next_try.get(name, 0):
+                    continue
+                hist = [t for t in self.starts.get(name, []) if now - t < CRASH_WINDOW]
+                if len(hist) >= CRASH_LIMIT:
+                    self.gave_up[name] = now + GIVE_UP_FOR
+                    self.starts[name] = []
+                    log.error("%s: renderer keeps dying (%d starts in %ds); giving up for %d min. See %s",
+                              name, len(hist), CRASH_WINDOW, GIVE_UP_FOR // 60, engine.STATE / f"{name}.log")
+                    continue
+                why = "first start" if not hist else f"restart #{len(hist)}"
+                if self._start(cfg, name, iid, why):
+                    hist.append(now)
+                    self.next_try[name] = now + min(8.0, 0.5 * 2 ** (len(hist) - 1))
+                self.starts[name] = hist
+                continue
+            if now - self.began.get(name, 0) > CRASH_WINDOW:  # it has been stable: forget old crashes
+                self.starts.pop(name, None)
+            if layers is not None:
+                self._guard(cfg, name, iid, layers, now)
+        # unplugged: stop its renderer (the saved assignment stays)
+        if live:
+            names = {o["name"] for o in live}
+            for name in list(saved):
+                if name not in names and self.eng.alive_fast(name):
+                    self.eng.stop(name)
+                    log.info("%s: output gone, stopped its renderer", name)
+
+    def _guard(self, cfg, name: str, iid: str, layers, now: float):
+        if self.eng.current_layer(name) != "background" or now - self.began.get(name, 0) < 1.0:
+            return
+        above = covered(layers, name)
+        if not above or now < self.guard_off.get(name, 0):
+            return
+        hist = [t for t in self.recreated.get(name, []) if now - t < GUARD_WINDOW]
+        if hist and now - hist[-1] < GUARD_GAP:
+            return
+        if len(hist) >= GUARD_LIMIT:
+            self.guard_off[name] = now + GUARD_WINDOW
+            log.error("%s: %s keeps covering the wallpaper; stacking guard paused for %d min", name, above, GUARD_WINDOW // 60)
+            self.recreated[name] = []
+            return
+        if self._start(cfg, name, iid, f"stacking: {above} was above"):
+            hist.append(now)
+        self.recreated[name] = hist
+
+
+# ---------------------------------------------------------------- main loop
+def _setup_logging():
+    d = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "wallforge"
+    d.mkdir(parents=True, exist_ok=True)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S")
+    fh = logging.handlers.RotatingFileHandler(d / "daemon.log", maxBytes=200_000, backupCount=1, encoding="utf-8")
+    sh = logging.StreamHandler()
+    for h in (fh, sh):
+        h.setFormatter(fmt)
+        log.addHandler(h)
+    log.setLevel(logging.INFO)
+
+
+def _reap():
+    try:
+        while os.waitpid(-1, os.WNOHANG)[0]:
+            pass
+    except ChildProcessError:
+        pass
+
+
+def _persist(live: list[dict]):
+    """Write idents / re-keyed connectors back, from a fresh read so a GUI save in between is not lost."""
+    fresh = config.Config()
+    _, fixed = resolve(fresh.data.get("outputs", {}), live)
+    if fixed != fresh.data.get("outputs"):
+        fresh.data["outputs"] = fixed
+        fresh.save()
+        log.info("saved outputs: %s", {k: v.get("ident", "") for k, v in fixed.items()})
+
+
+def main() -> int:
+    if not acquire_lock():
+        print("wallforge daemon already running", file=sys.stderr)
+        return 0
+    _setup_logging()
+    discover_env()
+    log.info("daemon started (pid %d, %s)", os.getpid(), os.environ.get("XDG_CURRENT_DESKTOP", "?"))
+    sup = Supervisor()
+    cfg, mtime = config.Config(), 0.0
+    t0, seen_outputs, empty_since = time.monotonic(), False, None
+    last_live: list[dict] | None = None
+    while True:
+        _reap()
+        try:
+            m = config.CONFIG_FILE.stat().st_mtime
+            if m != mtime:
+                cfg, mtime = config.Config(), m
+                sup.busy_until = max(sup.busy_until, time.monotonic() + FAST_FOR)
+        except OSError:
+            pass
+        live = monitors.outputs()
+        if live:
+            seen_outputs, empty_since = True, None
+            live.sort(key=lambda o: o["name"])
+            if [(o["name"], o.get("ident")) for o in live] != [(o["name"], o.get("ident")) for o in (last_live or [])]:
+                log.info("outputs: %s", [(o["name"], o.get("ident", "")) for o in live])
+                sup.busy_until = max(sup.busy_until, time.monotonic() + FAST_FOR)
+                last_live = live
+                try:
+                    _persist(live)
+                    cfg, mtime = config.Config(), config.CONFIG_FILE.stat().st_mtime
+                except Exception as e:
+                    log.warning("could not save outputs: %s", e)
+            try:
+                sup.tick(cfg, live, layers_snapshot())
+            except Exception:
+                log.exception("tick failed")
+        else:
+            now = time.monotonic()
+            empty_since = empty_since or now
+            if (not seen_outputs and now - t0 > WAIT_DISPLAY) or (seen_outputs and now - empty_since > 60):
+                log.info("no display (any more); exiting")
+                return 0
+        time.sleep(FAST if time.monotonic() < sup.busy_until or not seen_outputs else SLOW)

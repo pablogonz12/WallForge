@@ -118,8 +118,19 @@ The renderer died three times in five minutes and WallForge stopped retrying to 
 the log (Settings > About > View log); send it with a bug report. Pressing play on the wallpaper starts it again.
 
 **Wallpapers are gone after logging in.**
-Turn on Settings > Desktop > Restore wallpapers at login. If your compositor ignores XDG autostart entries, run
-`/path/to/wallforge.sh --restore` from its startup configuration.
+Run `wallforge --doctor`: it shows whether the daemon runs and which login mechanisms (systemd unit, XDG entry, niri
+spawn-at-startup) are in place. Turn on Settings > Desktop > Restore wallpapers at login (on by default) and open
+WallForge once so it writes them. Hyprland and sway without systemd/uwsm need one line in their own config:
+`exec-once = wallforge --daemon` (Hyprland) or `exec wallforge --daemon` (sway). The daemon log is
+`~/.local/state/wallforge/daemon.log`; check the service with `systemctl --user status wallforge.service`.
+
+**The wallpaper starts but another wallpaper (Noctalia, swaybg, hyprpaper) is drawn over it.**
+Surfaces created later draw on top. On niri and Hyprland the daemon notices this and recreates WallForge's surface on
+top within a few seconds; on other compositors start WallForge after your other wallpaper client.
+
+**Wallpapers were lost after a dock or monitor change.**
+Connector names can change between boots. WallForge saves each monitor's make/model/serial and matches by that; if two
+identical monitors have no serial, they are matched by connector name.
 
 ## Sharing and Discover
 

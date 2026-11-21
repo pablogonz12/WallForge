@@ -11,7 +11,7 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / 
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULTS = {
-    "version": 5,
+    "version": 6,
     "engine_dir": "",  # empty -> auto-detect
     "renderer": "native",  # native (wallforge-render, used where it can) | legacy (linux-wallpaperengine only)
     "assets_dir": "",  # empty -> auto (own download, then Steam)
@@ -20,7 +20,7 @@ DEFAULTS = {
     "show_anime": False,
     "ultrawide_on_16_9": True,  # allow ultrawide wallpapers on 16:9 screens (cropped to fill)
     "safe_content": True,  # Discover hides Mature/Questionable
-    "autostart": False,
+    "autostart": True,  # start the session daemon at login (systemd user unit, XDG autostart, niri spawn-at-startup)
     "niri_overview_backdrop": True,  # niri only: show the wallpaper behind the overview, not inside each workspace
     "rotate_minutes": 0,  # change the wallpaper every N minutes, 0 = never
     "rotate_shuffle": True,  # pick at random instead of the next wallpaper in the library
@@ -49,7 +49,7 @@ DEFAULTS = {
         "no_fullscreen_pause": False,
         "fullscreen_pause_only_active": True,
     },
-    "outputs": {},  # connector -> {"id": item id}
+    "outputs": {},  # connector -> {"id": item id, "ident": "make|model|serial"}
     "values": {},  # item id -> {property: value} user overrides
     "volumes": {},  # item id -> 0..100, the wallpaper's own volume (scaled by the global one)
     "favorites": [],
@@ -98,6 +98,11 @@ class Config:
             self.save()
         if self.data.get("version", 1) < 5:  # v5: render scale and battery saving; the new engine keys come from defaults
             self.data["version"] = 5
+            self.save()
+        if self.data.get("version", 1) < 6:  # v6: the login daemon; anyone with saved wallpapers gets it on
+            if self.data.get("outputs"):
+                self.data["autostart"] = True
+            self.data["version"] = 6
             self.save()
 
     def save(self):

@@ -12,6 +12,17 @@ def _run(cmd: list[str]) -> str:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
 
 
+def make_ident(make="", model="", serial="") -> str:
+    """Stable identity of a physical monitor ("make|model|serial"), or "" when the compositor gives nothing useful.
+    Connector names (DP-3, DP-5...) can renumber across reboots with docks and MST hubs; this does not."""
+    bad = {"", "unknown", "none", "null", "0", "n/a"}
+    parts = [str(x or "").strip() for x in (make, model, serial)]
+    parts = ["" if p.lower() in bad else p for p in parts]
+    if not parts[0] and not parts[1]:
+        return ""
+    return "|".join(parts)
+
+
 def _niri():
     data = json.loads(_run(["niri", "msg", "-j", "outputs"]))
     res = []
@@ -19,7 +30,8 @@ def _niri():
         lg = o.get("logical") or {}
         mode = next((m for m in o.get("modes", []) if m.get("is_preferred")), {})
         res.append({"name": name, "width": lg.get("width") or mode.get("width", 0),
-                    "height": lg.get("height") or mode.get("height", 0)})
+                    "height": lg.get("height") or mode.get("height", 0),
+                    "ident": make_ident(o.get("make"), o.get("model"), o.get("serial"))})
     return res
 
 
@@ -27,7 +39,8 @@ def _hypr():
     res = []
     for o in json.loads(_run(["hyprctl", "-j", "monitors"])):
         sc = o.get("scale") or 1
-        res.append({"name": o["name"], "width": int(o["width"] / sc), "height": int(o["height"] / sc)})
+        res.append({"name": o["name"], "width": int(o["width"] / sc), "height": int(o["height"] / sc),
+                    "ident": make_ident(o.get("make"), o.get("model"), o.get("serial"))})
     return res
 
 
@@ -36,7 +49,8 @@ def _sway():
     for o in json.loads(_run(["swaymsg", "-t", "get_outputs", "-r"])):
         if o.get("active", True):
             r = o.get("rect") or {}
-            res.append({"name": o["name"], "width": r.get("width", 0), "height": r.get("height", 0)})
+            res.append({"name": o["name"], "width": r.get("width", 0), "height": r.get("height", 0),
+                        "ident": make_ident(o.get("make"), o.get("model"), o.get("serial"))})
     return res
 
 
@@ -44,12 +58,17 @@ def _wlr():
     res, cur = [], None
     for line in _run(["wlr-randr"]).splitlines():
         if line and not line[0].isspace():
-            cur = {"name": line.split()[0], "width": 0, "height": 0}
+            cur = {"name": line.split()[0], "width": 0, "height": 0, "_f": {}}
             res.append(cur)
+        elif cur and ":" in line and line.split(":", 1)[0].strip() in ("Make", "Model", "Serial"):
+            cur["_f"][line.split(":", 1)[0].strip().lower()] = line.split(":", 1)[1].strip()
         elif cur and "current" in line:
             m = re.search(r"(\d+)x(\d+)", line)
             if m:
                 cur["width"], cur["height"] = int(m.group(1)), int(m.group(2))
+    for r in res:
+        f = r.pop("_f", {})
+        r["ident"] = make_ident(f.get("make"), f.get("model"), f.get("serial"))
     return [r for r in res if r["width"]]
 
 
@@ -60,6 +79,7 @@ def _mutter():
     r = bus.call_sync("org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig", "org.gnome.Mutter.DisplayConfig",
                       "GetCurrentState", None, None, Gio.DBusCallFlags.NONE, 3000, None).unpack()
     _serial, monitors, logical, _props = r
+    idents = {m[0][0]: make_ident(m[0][1], m[0][2], m[0][3]) for m in monitors}
     modes = {}
     for conn, _vendor_info, mlist, _p in ((m[0][0], m[0], m[1], m[2]) for m in monitors):
         cur = next((m for m in mlist if m[6].get("is-current")), None)
@@ -72,20 +92,28 @@ def _mutter():
             conn = mon[0]
             w, h = modes.get(conn, (0, 0))
             if w:
-                res.append({"name": conn, "width": int(w / scale), "height": int(h / scale)})
+                res.append({"name": conn, "width": int(w / scale), "height": int(h / scale),
+                            "ident": idents.get(conn, "")})
     return res
 
 
 def _gdk():
     import gi
     gi.require_version("Gdk", "4.0")
-    from gi.repository import Gdk
+    from gi.repository import Gdk, GLib
+    if Gdk.Display.get_default() is None:  # headless caller (the session daemon): open the display ourselves
+        gi.require_version("Gtk", "4.0")
+        from gi.repository import Gtk
+        Gtk.init_check()
+    while GLib.MainContext.default().iteration(False):  # let Gdk learn about hotplugged monitors
+        pass
     res = []
     mons = Gdk.Display.get_default().get_monitors()
     for i in range(mons.get_n_items()):
         m = mons.get_item(i)
         g = m.get_geometry()
-        res.append({"name": m.get_connector() or f"monitor-{i}", "width": g.width, "height": g.height})
+        res.append({"name": m.get_connector() or f"monitor-{i}", "width": g.width, "height": g.height,
+                    "ident": make_ident(m.get_manufacturer(), m.get_model(), "")})
     return res
 
 

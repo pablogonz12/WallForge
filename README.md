@@ -136,7 +136,7 @@ again from the menu (or your launcher) and it comes straight back. **Ctrl+Q** qu
 - **Per monitor**: apply to one screen or all. Ultrawide wallpapers are cropped to fill 16:9 screens, or skipped if you prefer.
 - **Auto scaling** by default; fill, fit and stretch are in Settings.
 - **Palette sync** with Noctalia, matugen, wallust, pywal or a custom command.
-- **Restore at login**: `wallforge --restore` re-applies your saved wallpapers (toggle in Settings).
+- **Restore at login**: a tiny background daemon (`wallforge --daemon`) sets your wallpapers at login, restarts them if they crash, follows monitor changes and keeps them above other wallpaper clients (toggle in Settings, on by default).
 - **Audio-reactive wallpapers** hear what you play: visualisers and spectrum effects are driven by the system's audio
   output, with no microphone involved, and stay idle when no wallpaper asks for them.
 - **Safe**: a crash shows a toast with a "View log" button, a dead renderer is restarted automatically, broken files
@@ -293,7 +293,8 @@ WallForge opens the item's Workshop page and you click **Unsubscribe** there.
 | Command | What it does |
 |---|---|
 | `wallforge` | The app. |
-| `wallforge --restore` | Re-apply the saved wallpapers and exit, for autostart. |
+| `wallforge --daemon` | Session supervisor started at login (systemd user unit, XDG autostart, niri spawn-at-startup); single instance. |
+| `wallforge --restore` | Re-apply the saved wallpapers once and exit. |
 | `wallforge --doctor` | Check the setup (Wayland, layer-shell, GTK, assets, renderer, decode) and exit; read-only, no display needed, exit code 1 when something is broken. |
 | `wallforge --import-we [FILE] [--dry-run]` | Import Wallpaper Engine's settings. |
 | `wallforge --commons [QUERY] [--topic NAME] [--get N]` | Search Wikimedia Commons videos; `--get N` imports result N. |
@@ -337,8 +338,9 @@ letterboxes.
 **How much does it cost while I work?** About 1% of one core for a 4K video, and a still scene sleeps after its first
 frame. The [performance table](#performance) is measured, not estimated, and `tools/bench.sh` reproduces it.
 
-**Does it come back after a reboot?** Yes: *Restore at login* in Settings, or `wallforge --restore` in your
-compositor's autostart.
+**Does it come back after a reboot?** Yes: *Restore at login* (on by default) starts `wallforge --daemon` through a
+systemd user unit, XDG autostart and niri's startup list. On Hyprland or sway without systemd, add `exec-once =
+wallforge --daemon` (Hyprland) or `exec wallforge --daemon` (sway) to your config; `wallforge --doctor` shows what is set up.
 
 ## When a wallpaper looks wrong
 

@@ -24,6 +24,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 from . import (  # noqa: E402
     __version__,  # noqa: E402
     assets,
+    autostart,
     commons,
     config,
     engine,
@@ -563,7 +564,7 @@ class Window(Adw.ApplicationWindow):
             try:
                 for o in outputs:
                     engine.start(self.cfg, it, o)
-                    self.cfg.data["outputs"][o] = {"id": it.id}
+                    self.cfg.data["outputs"][o] = {"id": it.id, "ident": mons.get(o, {}).get("ident", "")}
                     self._remember(o, it.id)
                 self.cfg.save()
                 if sync and outputs:
@@ -860,12 +861,15 @@ class Window(Adw.ApplicationWindow):
     def stop_output(self, output: str):
         self._forget(output)
         try:
+            engine.mark_stopped(output)  # the session daemon must not resurrect it
             engine.stop(output)
         except Exception:
             pass
 
     def _watchdog(self):
         """Restart wallpapers whose player died, unless battery saving says otherwise."""
+        if engine.daemon_alive():  # the session daemon supervises (backoff, hotplug, stacking); do not fight it
+            return
         if engine.pause_for_battery(self.cfg):
             if not self._battery_paused:
                 self._battery_paused = True
@@ -1473,9 +1477,10 @@ class Window(Adw.ApplicationWindow):
         ce = Adw.EntryRow(title="Custom palette command ({image} is the wallpaper image)", text=c.get("palette_command", ""))
         ce.connect("changed", lambda er: (c.update(palette_command=er.get_text()), self.cfg.save()))
         g3.add(ce)
-        r = Adw.SwitchRow(title="Restore wallpapers at login", subtitle="Writes an XDG autostart entry. If your compositor "
-                          "ignores those, run wallforge.sh --restore from its startup config.", active=autostart_enabled())
-        r.connect("notify::active", lambda rr, _p: set_autostart(rr.get_active()))
+        r = Adw.SwitchRow(title="Restore wallpapers at login", subtitle="Starts a background daemon that sets your wallpapers "
+                          "at login, restarts them if they crash and follows monitor changes. " + (autostart.config_hint() or "Uses a systemd user unit, XDG autostart and niri's startup list."),
+                          active=autostart_enabled())
+        r.connect("notify::active", lambda rr, _p: set_autostart(rr.get_active(), self.cfg))
         g3.add(r)
         if niri.available():
             rn = Adw.SwitchRow(title="Fill the niri overview", subtitle="Shows the live wallpaper behind the overview "
@@ -1486,7 +1491,7 @@ class Window(Adw.ApplicationWindow):
                 self.cfg.save()
 
                 def work(on=rr.get_active()):
-                    err = niri.apply(on)
+                    err = niri.apply(on, autostart.niri_spawn() if self.cfg.data.get("autostart") else None)
                     if not err:
                         refresh_wallpapers(self.cfg)
                     if err:
@@ -1761,22 +1766,22 @@ class Window(Adw.ApplicationWindow):
 RESTART_KEYS = {"fps", "render_scale", "disable_particles", "disable_mouse", "disable_parallax", "layer", "scaling",
                 "clamp", "no_audio_processing", "no_fullscreen_pause", "fullscreen_pause_only_active"}
 
-AUTOSTART = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "autostart/dev.wallforge.Wallforge-restore.desktop"
-
-
 def autostart_enabled() -> bool:
-    return AUTOSTART.is_file()
+    return autostart.xdg_enabled() or autostart.unit_enabled()
 
 
-def set_autostart(on: bool):
-    if not on:
-        AUTOSTART.unlink(missing_ok=True)
-        return
-    launcher = shutil.which("wallforge") or str(Path(__file__).resolve().parent.parent / "wallforge.sh")
-    AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
-    AUTOSTART.write_text(f"[Desktop Entry]\nType=Application\nName=WallForge (restore wallpapers)\n"
-                         f"Exec={launcher} --restore\nIcon=dev.wallforge.Wallforge\nNoDisplay=true\n"
-                         "X-GNOME-Autostart-enabled=true\n")
+def set_autostart(on: bool, cfg: config.Config | None = None):
+    """The settings toggle: every login mechanism (systemd unit, XDG entry, niri spawn-at-startup) follows it."""
+    if cfg is not None:
+        cfg.data["autostart"] = on
+        cfg.save()
+    overview = bool((cfg.data if cfg else config.Config().data).get("niri_overview_backdrop", True))
+    autostart.sync(on, overview)
+    if on:  # start it now too, so the toggle takes effect without a re-login
+        try:
+            subprocess.Popen(autostart.daemon_cmd(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            pass
 
 
 class _FlowFilter:
@@ -1791,7 +1796,12 @@ class App(Adw.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID)
         self.cfg = config.Config()
-        niri.apply(bool(self.cfg.data.get("niri_overview_backdrop", True)))
+        overview = bool(self.cfg.data.get("niri_overview_backdrop", True))
+        niri.apply(overview, autostart.niri_spawn() if self.cfg.data.get("autostart") else None)
+        try:
+            autostart.sync(bool(self.cfg.data.get("autostart", True)), overview)  # self-heals missing/old login entries
+        except Exception:
+            pass
 
     def do_activate(self):
         if not getattr(self, "_css", False):  # only once: reopening the window must not stack CSS providers
@@ -1858,7 +1868,8 @@ def _tilde(p) -> str:
 def main():
     if "--restore" in sys.argv:
         cfg = config.Config()
-        niri.apply(bool(cfg.data.get("niri_overview_backdrop", True)))
+        niri.apply(bool(cfg.data.get("niri_overview_backdrop", True)),
+                   autostart.niri_spawn() if cfg.data.get("autostart") else None)
         print("started", restore(cfg))
         return 0
     if "--doctor" in sys.argv:  # read-only setup check, no display needed

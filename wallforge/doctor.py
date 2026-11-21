@@ -68,6 +68,35 @@ def _session() -> tuple[str, str]:
     return OK, f"{desktop} on {kind or 'wayland'}"
 
 
+def _autostart(raw: dict) -> list[tuple[str, str, str]]:
+    """One line per login mechanism, plus whether the daemon is running now."""
+    from . import autostart
+
+    want = raw.get("autostart", True) if raw else True
+    st = autostart.status()
+    desk = autostart.desktop() or "?"
+    out = []
+    pid = st["daemon"]
+    out.append((OK if pid else (WARN if want else OK), "daemon",
+                f"running (pid {pid}), log ~/.local/state/wallforge/daemon.log" if pid else
+                "not running" + (": start it with wallforge --daemon, or log in again" if want else " (restore at login is off)")))
+    if not want:
+        out.append((OK, "autostart", "off (Settings > Desktop > Restore wallpapers at login)"))
+        return out
+    ok = bool(st["unit_file"] and st["unit_enabled"])
+    out.append((OK if ok else WARN, "autostart: systemd unit",
+                "wallforge.service enabled" if ok else "not enabled; open WallForge once, or: systemctl --user enable wallforge.service"))
+    out.append((OK if st["xdg"] else WARN, "autostart: XDG entry",
+                "installed" if st["xdg"] else "missing (GNOME/KDE use it); open WallForge once to write it"))
+    if "niri" in desk or os.environ.get("NIRI_SOCKET"):
+        out.append((OK if st["niri"] else WARN, "autostart: niri",
+                    "spawn-at-startup in niri/wallforge.kdl" if st["niri"] else "missing from niri/wallforge.kdl; open WallForge once"))
+    hint = autostart.config_hint()
+    if hint:
+        out.append((WARN, f"autostart: {desk}", hint))
+    return out
+
+
 def _renderer() -> tuple[str, str]:
     rend = paths.find_render()
     if not rend:
@@ -156,6 +185,7 @@ def checks() -> list[tuple[str, str, str]]:
     out.append((st, "session", msg))
     st, msg, raw = _config()
     out.append((st, "config", msg))
+    out.extend(_autostart(raw))
     st, msg = _renderer()
     out.append((st, "renderer", msg))
     st, msg = _assets(raw.get("assets_dir", ""))

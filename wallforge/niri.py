@@ -5,6 +5,7 @@ and makes sure niri's config.kdl includes it once. No-op when niri is not the co
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -14,13 +15,21 @@ FILE_NAME = "wallforge.kdl"
 INCLUDE = f'include optional=true "{FILE_NAME}"'
 BACKUP = "config.kdl.bak-wallforge"
 
-_ON = """// Managed by WallForge (Settings > Desktop > Fill the niri overview). Do not edit.
-layer-rule {
+_RULE = """layer-rule {
     match namespace="^wallforge$"
     place-within-backdrop true
 }
 """
-_OFF = "// Managed by WallForge (Settings > Desktop > Fill the niri overview). Currently off.\n"
+
+
+def render(on: bool, spawn: list[str] | None = None) -> str:
+    """Content of the managed file: the overview-backdrop rule (when on) and the daemon's spawn-at-startup line."""
+    head = ("// Managed by WallForge (Settings > Desktop > Fill the niri overview, Restore wallpapers at login). Do not edit.\n"
+            if on or spawn else "// Managed by WallForge (Settings > Desktop > Fill the niri overview). Currently off.\n")
+    body = ""
+    if spawn:  # niri ignores XDG autostart; the daemon holds a lock, so a second copy exits at once
+        body += "spawn-at-startup " + " ".join(json.dumps(a) for a in spawn) + "\n"
+    return head + body + (_RULE if on else "")
 
 
 def niri_dir() -> Path:
@@ -44,7 +53,7 @@ def _validate(cfg: Path) -> str:
     return "" if r.returncode == 0 else (r.stderr or r.stdout).strip()
 
 
-def apply(on: bool) -> str:
+def apply(on: bool, spawn: list[str] | None = None) -> str:
     """Make the niri config match the setting. Returns "" on success or no-op, else an error message."""
     if not available():
         return ""
@@ -52,7 +61,7 @@ def apply(on: bool) -> str:
     main, mine = d / "config.kdl", d / FILE_NAME
     old_mine = mine.read_text() if mine.exists() else None
     old_main = main.read_text()
-    new_mine = _ON if on else _OFF
+    new_mine = render(on, spawn)
     has_include = any(ln.strip() == INCLUDE for ln in old_main.splitlines())
     if old_mine == new_mine and has_include:
         return ""

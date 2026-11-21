@@ -358,6 +358,42 @@ def promote(cfg, item: library.Item, output: str) -> bool:
     return True
 
 
+def _stopped_file(output: str): return STATE / f"{output}.stopped"
+
+
+def mark_stopped(output: str):
+    """The user stopped this output on purpose: the session daemon must not bring it back (cleared by the next start)."""
+    STATE.mkdir(parents=True, exist_ok=True)
+    _stopped_file(output).touch()
+
+
+def clear_stopped(output: str):
+    _stopped_file(output).unlink(missing_ok=True)
+
+
+def is_stopped(output: str) -> bool:
+    return _stopped_file(output).exists()
+
+
+def daemon_alive() -> bool:
+    """The session daemon (wallforge --daemon) is running; it then owns restarting crashed wallpapers."""
+    from . import daemon
+
+    return daemon.running_pid() is not None
+
+
+def alive_fast(output: str) -> bool:
+    """Cheap liveness check from the pidfile (no /proc scan); falls back to the scan for renderers we did not start."""
+    try:
+        pid = int(_pidfile(output).read_text())
+        if (Path(f"/proc/{pid}/comm").read_text().startswith(("linux-wallpaper", "wallforge-rend", "wallforge-web", "python"))
+                and Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"):
+            return True
+    except Exception:
+        pass
+    return running(output) is not None
+
+
 def running(output: str) -> int | None:
     pids = find_pids(output)
     return pids[0] if pids else None
@@ -392,6 +428,7 @@ def start(cfg, item: library.Item, output: str, overrides: dict | None = None, l
     ready = STATE / f"{output}.ready"
     ready.unlink(missing_ok=True)
     STATE.mkdir(parents=True, exist_ok=True)
+    clear_stopped(output)
     web = use_web(item) and not legacy
     native = not web and use_native(cfg, item) and not legacy
     _marker(output).write_text("web" if web else "native" if native else "legacy")
