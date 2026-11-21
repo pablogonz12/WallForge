@@ -1484,9 +1484,15 @@ class Window(Adw.ApplicationWindow):
             def niri_ch(rr, _p):
                 c["niri_overview_backdrop"] = rr.get_active()
                 self.cfg.save()
-                err = niri.apply(rr.get_active())
-                if err:
-                    rn.set_subtitle("niri rejected the change, nothing was modified: " + err.splitlines()[-1][:160])
+
+                def work(on=rr.get_active()):
+                    err = niri.apply(on)
+                    if not err:
+                        refresh_wallpapers(self.cfg)
+                    if err:
+                        GLib.idle_add(lambda: rn.set_subtitle(
+                            "niri rejected the change, nothing was modified: " + err.splitlines()[-1][:160]))
+                threading.Thread(target=work, daemon=True).start()
             rn.connect("notify::active", niri_ch)
             g3.add(rn)
         gw = Adw.PreferencesGroup(title="Wallpaper Engine", description="Bring over what you set up in Wallpaper Engine itself: "
@@ -1818,6 +1824,23 @@ def restore(cfg: config.Config) -> int:
     for out, v in cfg.data["outputs"].items():
         it = items.get(v.get("id"))
         if it and not it.broken and not engine.running(out):
+            try:
+                engine.start(cfg, it, out)
+                n += 1
+            except Exception as e:
+                print(f"{out}: {e}", file=sys.stderr)
+    return n
+
+
+def refresh_wallpapers(cfg: config.Config) -> int:
+    """Recreate the layer surfaces of running wallpapers (niri applies layer rules at creation).
+    engine.start starts the new renderer first and retires the old one after its first frame, so there is no black frame."""
+    time.sleep(0.6)  # let niri hot-reload the config file first
+    items = {i.id: i for i in library.scan()}
+    n = 0
+    for out, v in cfg.data["outputs"].items():
+        it = items.get(v.get("id"))
+        if it and not it.broken and engine.running(out):
             try:
                 engine.start(cfg, it, out)
                 n += 1
