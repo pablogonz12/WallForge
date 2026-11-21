@@ -62,7 +62,9 @@ pub fn run(args: Args) {
         sa.sa_sigaction = crate::on_signal as *const () as usize;
         libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
         libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
-        if args.hidden { crate::HIDDEN.store(true, Ordering::SeqCst); let mut su: libc::sigaction = std::mem::zeroed(); su.sa_sigaction = crate::on_usr1 as *const () as usize; libc::sigaction(libc::SIGUSR1, &su, std::ptr::null_mut()); }
+        if args.hidden { crate::HIDDEN.store(true, Ordering::SeqCst); }
+        let mut su: libc::sigaction = std::mem::zeroed(); su.sa_sigaction = crate::on_usr1 as *const () as usize; libc::sigaction(libc::SIGUSR1, &su, std::ptr::null_mut());
+        su.sa_sigaction = crate::on_usr2 as *const () as usize; libc::sigaction(libc::SIGUSR2, &su, std::ptr::null_mut());
     }
 
     let ready_file = args.ready_file.clone();
@@ -152,6 +154,7 @@ pub fn run(args: Args) {
     let mut dirty = true;
     let mut shown = 0u64;
     let mut was_hidden = false;
+    let mut was_paused = false;
     while !STOP.load(Ordering::SeqCst) && !app.closed {
         if let Some(d) = args.duration { if start.elapsed().as_secs_f64() >= d { break; } }
         if let Err(e) = queue.dispatch_pending(&mut app) { eprintln!("wallforge-render: wayland error ({e}); exiting"); break; }
@@ -168,8 +171,11 @@ pub fn run(args: Args) {
         }
         if engine.text_tick() { dirty = true; }
         if was_hidden && !crate::HIDDEN.load(Ordering::SeqCst) { was_hidden = false; app.cb_ready = true; dirty = true; }
+        let paused = crate::PAUSED.load(Ordering::SeqCst);
+        if paused { app.cb_ready = false; was_paused = true; }
+        else if was_paused { was_paused = false; app.cb_ready = true; dirty = true; next_due = Instant::now(); }
         let now = Instant::now();
-        if app.cb_ready && (dirty || ((engine.animated || engine.audio_dirty) && now >= next_due)) {
+        if !paused && app.cb_ready && (dirty || ((engine.animated || engine.audio_dirty) && now >= next_due)) {
             engine.tick();
             let hid = crate::HIDDEN.load(Ordering::SeqCst);
             if !hid { surface.frame(&qh, ()); }
@@ -197,6 +203,7 @@ pub fn run(args: Args) {
                 Some(d) => { let r = d.saturating_duration_since(now); (r.as_micros().div_ceil(1000) as i32).clamp(if r.is_zero() { 0 } else { 1 }, 3_600_000) }
             };
             let r = unsafe { libc::poll(fds.as_mut_ptr(), 2, timeout_ms) };
+            if r > 0 && fds[1].revents != 0 { let mut junk = [0u8; 16]; unsafe { libc::read(sig_pipe[0], junk.as_mut_ptr() as *mut _, 16); } } // USR1/USR2 wake-ups: drain, or poll() spins
             if r > 0 && fds[0].revents != 0 {
                 if let Err(e) = guard.read() {
                     if !matches!(&e, wayland_client::backend::WaylandError::Io(io) if io.kind() == std::io::ErrorKind::WouldBlock) {
