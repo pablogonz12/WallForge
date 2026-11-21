@@ -81,9 +81,11 @@ class GuardTests(unittest.TestCase):
 class FakeEngine:
     def __init__(self):
         self.alive, self.started, self.stopped, self.flag, self.layer = set(), [], [], set(), "background"
+        self.flag_busy = set()
 
     def pause_for_battery(self, cfg): return False
     def is_stopped(self, o): return o in self.flag
+    def busy(self, o): return o in self.flag_busy
     def alive_fast(self, o): return o in self.alive
     def current_layer(self, o): return self.layer
     def stop(self, o): self.stopped.append(o); self.alive.discard(o)
@@ -132,6 +134,27 @@ class SupervisorTests(unittest.TestCase):
         self.tick(dt=daemon.GIVE_UP_FOR)
         self.assertEqual(self.eng.started.count("DP-2"), n + 1)  # cool-down over: tries again
 
+    def test_first_crash_is_restarted_immediately(self):
+        self.tick()
+        self.eng.alive.discard("DP-2")
+        self.eng.started.clear()
+        self.tick(dt=0.01)  # right after the crash, no backoff wait
+        self.assertEqual(self.eng.started, ["DP-2"])
+        self.eng.alive.discard("DP-2")
+        self.eng.started.clear()
+        self.tick(dt=0.01)  # the second crash in a row waits
+        self.assertEqual(self.eng.started, [])
+        self.assertGreater(self.sup.wait_hint(self.cfg, self.live, 5.0), 0.05 - 1e-9)
+        self.tick(dt=1)
+        self.assertEqual(self.eng.started, ["DP-2"])
+
+    def test_gui_switch_or_stop_in_progress_is_not_a_crash(self):
+        self.eng.alive.add("HDMI-A-2")
+        self.eng.flag_busy.add("DP-2")  # engine.stop/start running on it
+        self.tick()
+        self.assertEqual(self.eng.started, [])
+        self.assertEqual(self.sup.starts.get("DP-2"), None)
+
     def test_user_stopped_output_is_not_resurrected(self):
         self.eng.flag.add("DP-2")
         self.tick()
@@ -176,6 +199,20 @@ class MigrationTests(unittest.TestCase):
                 self.assertTrue(config.Config().data["autostart"])
                 f.write_text(json.dumps({"version": 5, "autostart": False, "outputs": {}}))
                 self.assertFalse(config.Config().data["autostart"])
+
+
+
+class XdgMigrationTests(unittest.TestCase):
+    def test_old_restore_entry_is_rewritten_in_place(self):
+        from wallforge import autostart
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "dev.wallforge.Wallforge-restore.desktop"
+            f.write_text(f"[Desktop Entry]\nExec={autostart.launcher()} --restore\n")
+            with mock.patch.object(autostart, "XDG_FILE", f):
+                self.assertTrue(autostart._write(f, autostart.xdg_text()))
+                self.assertIn("--daemon", f.read_text())
+                self.assertNotIn("--restore", f.read_text())
+                self.assertFalse(autostart._write(f, autostart.xdg_text()))  # idempotent
 
 
 if __name__ == "__main__":

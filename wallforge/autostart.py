@@ -46,6 +46,13 @@ def unit_text() -> str:
             "[Install]\nWantedBy=graphical-session.target\n")
 
 
+def xdg_text() -> str:
+    """The autostart entry. Same file name as the old ``--restore`` one, so it is rewritten in place (no duplicate)."""
+    return ("[Desktop Entry]\nType=Application\nName=WallForge (session daemon)\n"
+            f"Exec={' '.join(_quote(a) for a in daemon_cmd())}\nIcon=dev.wallforge.Wallforge\nNoDisplay=true\n"
+            "X-GNOME-Autostart-enabled=true\n")
+
+
 def _systemctl(*args: str) -> subprocess.CompletedProcess | None:
     try:
         return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True, timeout=15)
@@ -133,10 +140,7 @@ def enable(overview: bool = True) -> list[str]:
     from . import niri
 
     done = []
-    xdg = ("[Desktop Entry]\nType=Application\nName=WallForge (session daemon)\n"
-           f"Exec={' '.join(_quote(a) for a in daemon_cmd())}\nIcon=dev.wallforge.Wallforge\nNoDisplay=true\n"
-           "X-GNOME-Autostart-enabled=true\n")
-    if _write(XDG_FILE, xdg):
+    if _write(XDG_FILE, xdg_text()):
         done.append("xdg")
     if shutil.which("systemctl"):
         # a packaged unit is used as is; otherwise write ours into the user's unit dir
@@ -175,7 +179,7 @@ def sync(want: bool, overview: bool = True) -> list[str]:
         return []
     if xdg_enabled() and (UNIT_FILE.is_file() or packaged_unit()) and unit_enabled() and (not niri.available() or _niri_has_spawn()):
         try:  # all there; only rewrite if the launcher moved
-            if XDG_FILE.read_text().find(daemon_cmd()[0]) >= 0 and (
+            if XDG_FILE.read_text() == xdg_text() and (
                     not UNIT_FILE.is_file() or UNIT_FILE.read_text() == unit_text()):
                 return []
         except OSError:

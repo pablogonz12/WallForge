@@ -17,7 +17,10 @@ import json
 import logging
 import logging.handlers
 import os
+import select
 import shutil
+import signal
+import socket
 import subprocess
 import sys
 import time
@@ -35,6 +38,7 @@ GUARD_GAP, GUARD_LIMIT, GUARD_WINDOW = 15.0, 6, 600.0
 WAIT_DISPLAY = 120.0
 
 _lock_fh = None
+_wake_keep: list = []
 
 
 # ---------------------------------------------------------------- single instance
@@ -213,7 +217,7 @@ class Supervisor:
             name = o["name"]
             e = match.get(name)
             iid = (e or {}).get("id")
-            if not iid or paused or self.eng.is_stopped(name):
+            if not iid or paused or self.eng.is_stopped(name) or self.eng.busy(name):
                 continue
             if not self.eng.alive_fast(name):
                 if now < self.gave_up.get(name, 0) or now < self.next_try.get(name, 0):
@@ -228,7 +232,9 @@ class Supervisor:
                 why = "first start" if not hist else f"restart #{len(hist)}"
                 if self._start(cfg, name, iid, why):
                     hist.append(now)
-                    self.next_try[name] = now + min(8.0, 0.5 * 2 ** (len(hist) - 1))
+                    # the first crash is restarted at once; backoff only when it keeps dying
+                    k = len(hist)
+                    self.next_try[name] = now + (0 if k <= 1 else min(8.0, 0.5 * 2 ** (k - 2)))
                 self.starts[name] = hist
                 continue
             if now - self.began.get(name, 0) > CRASH_WINDOW:  # it has been stable: forget old crashes
@@ -242,6 +248,22 @@ class Supervisor:
                 if name not in names and self.eng.alive_fast(name):
                     self.eng.stop(name)
                     log.info("%s: output gone, stopped its renderer", name)
+
+    def wait_hint(self, cfg, live: list[dict], normal: float) -> float:
+        """How long the loop may sleep: short while a wanted renderer is down and due (or about to be), else ``normal``."""
+        now = self.now()
+        saved = cfg.data.get("outputs", {})
+        match, _ = resolve(saved, live)
+        hint = normal
+        for o in live:
+            name = o["name"]
+            if not (match.get(name) or {}).get("id") or self.eng.is_stopped(name) or self.eng.pause_for_battery(cfg):
+                continue
+            if self.eng.alive_fast(name):
+                continue
+            due = max(self.gave_up.get(name, 0), self.next_try.get(name, 0))
+            hint = min(hint, max(0.05, due - now))
+        return hint
 
     def _guard(self, cfg, name: str, iid: str, layers, now: float):
         if self.eng.current_layer(name) != "background" or now - self.began.get(name, 0) < 1.0:
@@ -275,6 +297,36 @@ def _setup_logging():
     log.setLevel(logging.INFO)
 
 
+def _child_wakeup() -> socket.socket:
+    """A socket that becomes readable when a child exits (SIGCHLD): renderers we started wake the loop at once."""
+    r, w = socket.socketpair()
+    r.setblocking(False)
+    w.setblocking(False)
+    signal.signal(signal.SIGCHLD, lambda *_: None)  # a handler must exist for the wakeup fd to be written
+    signal.set_wakeup_fd(w.fileno(), warn_on_full_buffer=False)
+    _wake_keep.append(w)  # the write end must stay open for the life of the process
+    return r
+
+
+def _drain(r: socket.socket):
+    try:
+        while r.recv(4096):
+            pass
+    except (BlockingIOError, OSError):
+        pass
+
+
+def _pidfds(live: list[dict]) -> list[int]:
+    """pidfds of the running renderers: readable the moment one exits, child of ours or not."""
+    fds = []
+    for o in live:
+        try:
+            fds.append(os.pidfd_open(int((engine.STATE / f"{o['name']}.pid").read_text())))
+        except (OSError, ValueError, AttributeError):
+            pass
+    return fds
+
+
 def _reap():
     try:
         while os.waitpid(-1, os.WNOHANG)[0]:
@@ -301,6 +353,7 @@ def main() -> int:
     discover_env()
     log.info("daemon started (pid %d, %s)", os.getpid(), os.environ.get("XDG_CURRENT_DESKTOP", "?"))
     sup = Supervisor()
+    wake = _child_wakeup()
     cfg, mtime = config.Config(), 0.0
     t0, seen_outputs, empty_since = time.monotonic(), False, None
     last_live: list[dict] | None = None
@@ -336,4 +389,15 @@ def main() -> int:
             if (not seen_outputs and now - t0 > WAIT_DISPLAY) or (seen_outputs and now - empty_since > 60):
                 log.info("no display (any more); exiting")
                 return 0
-        time.sleep(FAST if time.monotonic() < sup.busy_until or not seen_outputs else SLOW)
+        normal = FAST if time.monotonic() < sup.busy_until or not seen_outputs else SLOW
+        # Forget the SIGCHLDs caused by our own `niri msg` calls, then look once more: a renderer that died in between is
+        # caught here, one that dies later wakes the select below.
+        _drain(wake)
+        _reap()
+        timeout = sup.wait_hint(cfg, live, normal) if live else normal
+        fds = _pidfds(live)  # renderers we did not start (GUI, before a daemon restart) wake us too
+        try:
+            select.select([wake, *fds], [], [], timeout)
+        finally:
+            for fd in fds:
+                os.close(fd)

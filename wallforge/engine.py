@@ -383,15 +383,17 @@ def daemon_alive() -> bool:
 
 
 def alive_fast(output: str) -> bool:
-    """Cheap liveness check from the pidfile (no /proc scan); falls back to the scan for renderers we did not start."""
+    """Cheap liveness check from the pidfile (no /proc scan). Only when there is no pidfile (a renderer someone else
+    started) does it scan; a dead pidfile pid means dead, even if an unrelated process happens to serve the same output."""
     try:
         pid = int(_pidfile(output).read_text())
-        if (Path(f"/proc/{pid}/comm").read_text().startswith(("linux-wallpaper", "wallforge-rend", "wallforge-web", "python"))
-                and Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"):
-            return True
-    except Exception:
-        pass
-    return running(output) is not None
+    except (OSError, ValueError):
+        return running(output) is not None
+    try:
+        return (Path(f"/proc/{pid}/comm").read_text().startswith(("linux-wallpaper", "wallforge-rend", "wallforge-web", "python"))
+                and Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z")
+    except OSError:
+        return False
 
 
 def running(output: str) -> int | None:
@@ -400,6 +402,8 @@ def running(output: str) -> int | None:
 
 
 def stop(output: str, wait: float = 3.0):
+    STATE.mkdir(parents=True, exist_ok=True)
+    _busy_file(output).touch()  # outlives the call by a few seconds, so a restart-after-stop is not mistaken for a crash
     stop_spare(output)
     pids = find_pids(output)
     for pid in pids:
@@ -415,7 +419,27 @@ def stop(output: str, wait: float = 3.0):
     _pidfile(output).unlink(missing_ok=True)
 
 
+def _busy_file(output: str): return STATE / f"{output}.busy"
+
+
+def busy(output: str, grace: float = 3.0) -> bool:
+    """A stop or switch is in progress on this output (or just ended): the session daemon must leave it alone."""
+    try:
+        return time.time() - _busy_file(output).stat().st_mtime < grace
+    except OSError:
+        return False
+
+
 def start(cfg, item: library.Item, output: str, overrides: dict | None = None, legacy: bool = False) -> int:
+    STATE.mkdir(parents=True, exist_ok=True)
+    _busy_file(output).touch()
+    try:
+        return _start(cfg, item, output, overrides, legacy)
+    finally:
+        _busy_file(output).unlink(missing_ok=True)
+
+
+def _start(cfg, item: library.Item, output: str, overrides: dict | None = None, legacy: bool = False) -> int:
     # Switching should look like a cut, not a black frame. Instead of killing the running wallpaper first, start the
     # new one, wait for its first presented frame (the renderer touches --ready-file), and only then retire the old
     # process. Web wallpapers are the exception: two WebKit layers on one output fight, so they stop first.
