@@ -31,6 +31,7 @@ from . import (  # noqa: E402
     importer,
     library,
     monitors,
+    niri,
     paths,
     rotation,
     theme,
@@ -1476,6 +1477,18 @@ class Window(Adw.ApplicationWindow):
                           "ignores those, run wallforge.sh --restore from its startup config.", active=autostart_enabled())
         r.connect("notify::active", lambda rr, _p: set_autostart(rr.get_active()))
         g3.add(r)
+        if niri.available():
+            rn = Adw.SwitchRow(title="Fill the niri overview", subtitle="Shows the live wallpaper behind the overview "
+                               "instead of a copy inside each workspace.", active=bool(c.get("niri_overview_backdrop", True)))
+
+            def niri_ch(rr, _p):
+                c["niri_overview_backdrop"] = rr.get_active()
+                self.cfg.save()
+                err = niri.apply(rr.get_active())
+                if err:
+                    rn.set_subtitle("niri rejected the change, nothing was modified: " + err.splitlines()[-1][:160])
+            rn.connect("notify::active", niri_ch)
+            g3.add(rn)
         gw = Adw.PreferencesGroup(title="Wallpaper Engine", description="Bring over what you set up in Wallpaper Engine itself: "
                                   "each wallpaper's customised settings and volume, the frame rate limit and the fullscreen rule.")
         pg.add(gw)
@@ -1772,6 +1785,7 @@ class App(Adw.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID)
         self.cfg = config.Config()
+        niri.apply(bool(self.cfg.data.get("niri_overview_backdrop", True)))
 
     def do_activate(self):
         if not getattr(self, "_css", False):  # only once: reopening the window must not stack CSS providers
@@ -1820,7 +1834,9 @@ def _tilde(p) -> str:
 
 def main():
     if "--restore" in sys.argv:
-        print("started", restore(config.Config()))
+        cfg = config.Config()
+        niri.apply(bool(cfg.data.get("niri_overview_backdrop", True)))
+        print("started", restore(cfg))
         return 0
     if "--doctor" in sys.argv:  # read-only setup check, no display needed
         from . import doctor

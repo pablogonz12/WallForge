@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **niri**: Settings > Desktop > "Fill the niri overview" shows the live wallpaper behind niri's overview (one wallpaper behind
+  the workspace cards) by managing `~/.config/niri/wallforge.kdl`; on by default.
+
 ## 0.8.0 (2026-11-20)
 
 ### New

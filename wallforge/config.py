@@ -21,6 +21,7 @@ DEFAULTS = {
     "ultrawide_on_16_9": True,  # allow ultrawide wallpapers on 16:9 screens (cropped to fill)
     "safe_content": True,  # Discover hides Mature/Questionable
     "autostart": False,
+    "niri_overview_backdrop": True,  # niri only: show the wallpaper behind the overview, not inside each workspace
     "rotate_minutes": 0,  # change the wallpaper every N minutes, 0 = never
     "rotate_shuffle": True,  # pick at random instead of the next wallpaper in the library
     "rotate_favorites": False,  # rotate only through favourites
