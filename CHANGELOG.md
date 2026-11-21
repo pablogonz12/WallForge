@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Updates swap the renderer.** The session daemon keeps renderers alive across a service restart (so a restart is
+  not a black flash), which meant an update kept running the old renderer binary. `install.sh` now ends with
+  `wallforge --reload`, which replaces each running wallpaper one by one with the new binary (new one up first, no
+  black frame). `--reload` also works by itself.
+
 - **One-line install and update.** `install.sh` now really installs into `~/.local/opt/wallforge` (sources, menu
   entry, `wallforge` command, login service, renderer build), so the README's promise holds. `update.sh` updates an
   install from `main`: `curl -fsSL https://raw.githubusercontent.com/pgm1207/WallForge/main/update.sh | bash`. It

@@ -1844,10 +1844,12 @@ def restore(cfg: config.Config) -> int:
     return n
 
 
-def refresh_wallpapers(cfg: config.Config) -> int:
-    """Recreate the layer surfaces of running wallpapers (niri applies layer rules at creation).
+def refresh_wallpapers(cfg: config.Config, settle: float = 0.6) -> int:
+    """Recreate the layer surfaces of running wallpapers (niri applies layer rules at creation). Stops a covered
+    wallpaper that ran before the pause existed, and after an update swaps in the new renderer binary.
     engine.start starts the new renderer first and retires the old one after its first frame, so there is no black frame."""
-    time.sleep(0.6)  # let niri hot-reload the config file first
+    if settle:
+        time.sleep(settle)  # let niri hot-reload the config file first
     items = {i.id: i for i in library.scan()}
     n = 0
     for out, v in cfg.data["outputs"].items():
@@ -1868,6 +1870,11 @@ def _tilde(p) -> str:
 
 
 def main():
+    if "--reload" in sys.argv:
+        # Recreate every running wallpaper with the installed renderer binary (used by install.sh after an update:
+        # the session daemon keeps the old renderers alive on purpose, so a unit restart alone would not swap them).
+        print("reloaded", refresh_wallpapers(config.Config(), settle=0.0))
+        return 0
     if "--restore" in sys.argv:
         cfg = config.Config()
         niri.apply(bool(cfg.data.get("niri_overview_backdrop", True)),

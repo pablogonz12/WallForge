@@ -82,10 +82,18 @@ fi
 
 # ── keep a running session on the new code (only for the real install, never for a test prefix) ──
 [ "$(readlink -f "$PREFIX")" = "$(readlink -f "$HOME/.local/opt/wallforge")" ] || { echo "Installed. Run '$PREFIX/wallforge.sh' or open WallForge in your app menu."; exit 0; }
+restarted=""
 if command -v systemctl >/dev/null && systemctl --user is-active --quiet wallforge.service 2>/dev/null; then
-  systemctl --user restart wallforge.service && echo "Restarted wallforge.service."
-elif pgrep -f "wallforge(/wallforge.sh)? --daemon|wallforge.sh --daemon" >/dev/null 2>&1; then
-  pkill -f "wallforge.*--daemon" && echo "Restarted the WallForge daemon." || true
+  systemctl --user restart wallforge.service && restarted="wallforge.service"
+elif pgrep -f "wallforge.*--daemon" >/dev/null 2>&1; then
+  pkill -f "wallforge.*--daemon" || true
+  ("$PREFIX/wallforge.sh" --daemon >/dev/null 2>&1 &)
+  restarted="the WallForge daemon"
+fi
+# The daemon keeps running renderers alive across a restart, so they still run the old binary. --reload replaces
+# them one by one with the new one (each new renderer is up before the old one retires, so no black frame).
+if [ -n "$restarted" ]; then
+  "$PREFIX/wallforge.sh" --reload >/dev/null 2>&1 && echo "Restarted $restarted and reloaded the wallpapers."
 fi
 
 echo "Installed. Run 'wallforge' or open WallForge in your app menu."
