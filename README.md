@@ -205,8 +205,24 @@ cd WallForge
 ./wallforge.sh
 ```
 
-`install.sh` installs into `~/.local/opt/wallforge` and links a launcher; the checkout stays the source of truth, so
-`--restore` and updates keep working.
+`install.sh` installs into `~/.local/opt/wallforge`, adds a `wallforge` command, the menu entry and the login
+service, and builds the renderer. The checkout stays the source of truth, so updates keep working.
+
+### Update
+
+One line, from anywhere; it updates the installed copy, rebuilds the renderer and restarts a running session:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pgm1207/WallForge/main/update.sh | bash
+```
+
+Or, from a checkout you keep:
+
+```bash
+git pull && ./install.sh --from-git
+```
+
+`install.sh --no-build` skips the renderer build and keeps the installed binary.
 
 On other distributions, install the same pieces from your package manager:
 

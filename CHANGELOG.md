@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **One-line install and update.** `install.sh` now really installs into `~/.local/opt/wallforge` (sources, menu
+  entry, `wallforge` command, login service, renderer build), so the README's promise holds. `update.sh` updates an
+  install from `main`: `curl -fsSL https://raw.githubusercontent.com/pgm1207/WallForge/main/update.sh | bash`. It
+  fast-forwards the installed copy when it has one, falls back to a fresh download, rebuilds the renderer and
+  restarts a running session; `--no-build` skips the build.
+
 - **Wallpapers now reliably come back at every login.** `wallforge --daemon` is a small session supervisor (single
   instance, no GTK, ~0.3% of a core idle). It starts every saved output in parallel, restarts a renderer that crashes
   (backoff, gives up after 5 crashes a minute), follows monitor hotplug, retries outputs that were not ready yet, and
