@@ -1448,6 +1448,8 @@ class Window(Adw.ApplicationWindow):
         pg.add(g2)
         g1 = g2
         switch("Disable particles", "disable_particles")
+        switch("Pause when a window covers the screen", "pause_when_covered",
+               "A fullscreen window hides the wallpaper, so it stops rendering until you uncover it (niri; needs the login daemon).")
         spin("Render resolution (%)", "render_scale", 25, 100)
         r_pre = Adw.SwitchRow(title="Preload the next wallpaper", active=e.get("preload_next", True),
                               subtitle="Keeps the next wallpaper loaded behind the current one so switching is instant. "

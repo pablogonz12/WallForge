@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import config, engine, library, monitors
+from . import config, engine, library, monitors, pauser
 
 log = logging.getLogger("wallforge.daemon")
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
@@ -288,7 +288,7 @@ class Supervisor:
 def _setup_logging():
     d = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "wallforge"
     d.mkdir(parents=True, exist_ok=True)
-    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S")
+    fmt = logging.Formatter("%(asctime)s.%(msecs)03d %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S")
     fh = logging.handlers.RotatingFileHandler(d / "daemon.log", maxBytes=200_000, backupCount=1, encoding="utf-8")
     sh = logging.StreamHandler()
     for h in (fh, sh):
@@ -354,6 +354,8 @@ def main() -> int:
     log.info("daemon started (pid %d, %s)", os.getpid(), os.environ.get("XDG_CURRENT_DESKTOP", "?"))
     sup = Supervisor()
     wake = _child_wakeup()
+    pz = pauser.Pauser()
+    names_now = lambda: [o["name"] for o in (last_live or [])]  # noqa: E731
     cfg, mtime = config.Config(), 0.0
     t0, seen_outputs, empty_since = time.monotonic(), False, None
     last_live: list[dict] | None = None
@@ -389,6 +391,12 @@ def main() -> int:
             if (not seen_outputs and now - t0 > WAIT_DISPLAY) or (seen_outputs and now - empty_since > 60):
                 log.info("no display (any more); exiting")
                 return 0
+        want_pause = bool(cfg.data["engine"].get("pause_when_covered", True))
+        if want_pause != pz.enabled:
+            pz.enabled = want_pause
+        if want_pause:
+            pz.start(names_now)
+        pz.apply([o["name"] for o in live])  # new pids (gapless switch, restart) get the current state
         normal = FAST if time.monotonic() < sup.busy_until or not seen_outputs else SLOW
         # Forget the SIGCHLDs caused by our own `niri msg` calls, then look once more: a renderer that died in between is
         # caught here, one that dies later wakes the select below.

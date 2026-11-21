@@ -15,6 +15,10 @@
 - **Stacking guard** (niri, Hyprland): when another wallpaper client (Noctalia, swaybg, ...) creates its surface after
   ours and covers it, WallForge recreates its own on top, gaplessly.
 - Packages ship `wallforge.service`.
+- **Pause when covered** (niri, Settings > Engine, on by default): the daemon pauses a wallpaper's renderer while a
+  fullscreen window covers its screen (0% CPU instead of full rendering, since niri keeps sending frame callbacks) and
+  resumes it the instant the screen is uncovered or the overview opens. Follows niri's event stream, no polling.
+- Crash recovery is instant (the daemon wakes when a renderer exits) and the first crash is restarted immediately.
 - **niri**: Settings > Desktop > "Fill the niri overview" shows the live wallpaper behind niri's overview (one wallpaper behind
   the workspace cards) by managing `~/.config/niri/wallforge.kdl`; on by default.
 

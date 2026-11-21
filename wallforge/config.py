@@ -41,6 +41,7 @@ DEFAULTS = {
         "layer": "background",  # background|bottom (background is what niri's blur/xray and backdrop sample)
         "silent": False,
         "volume": 100,
+        "pause_when_covered": True,  # pause a wallpaper while a fullscreen window covers its screen (niri)
         "preload_next": True,  # keep the next wallpaper loaded on the layer below, so switching is instant
         "no_audio_processing": False,
         "disable_particles": False,

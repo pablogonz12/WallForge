@@ -396,6 +396,22 @@ def alive_fast(output: str) -> bool:
         return False
 
 
+def visible_pid(output: str) -> int | None:
+    """Pid of the renderer that is shown on this output (the pidfile one; a preloaded spare has its own file), if alive."""
+    try:
+        pid = int(_pidfile(output).read_text())
+        if Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z":
+            return pid
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def pausable(output: str) -> bool:
+    """The visible renderer understands SIGUSR2 (native renderer) and has presented its first frame."""
+    return was_native(output) and (STATE / f"{output}.ready").exists()
+
+
 def running(output: str) -> int | None:
     pids = find_pids(output)
     return pids[0] if pids else None
