@@ -35,8 +35,15 @@ static STOP: AtomicBool = AtomicBool::new(false);
 /// A `--hidden` spare draws (warm GL, textures, decoder) but never presents, so the compositor has nothing to show
 /// or sample, until SIGUSR1 clears this.
 pub static HIDDEN: AtomicBool = AtomicBool::new(false);
+/// SIGUSR2 pauses all work (no decode, no draw, no timers: the loop blocks until a signal or compositor event);
+/// SIGUSR1 resumes. The daemon sends these while a fullscreen window covers this output.
+pub static PAUSED: AtomicBool = AtomicBool::new(false);
+extern "C" fn on_usr2(_: i32) {
+    PAUSED.store(true, Ordering::SeqCst);
+}
 extern "C" fn on_usr1(_: i32) {
     HIDDEN.store(false, Ordering::SeqCst);
+    PAUSED.store(false, Ordering::SeqCst);
     let fd = SIG_PIPE_W.load(Ordering::SeqCst);
     if fd >= 0 { unsafe { libc::write(fd, [1u8].as_ptr() as *const _, 1); } }
 }
@@ -342,7 +349,9 @@ fn main() {
         sa.sa_sigaction = on_signal as *const () as usize;
         libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
         libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
-        if args.hidden { HIDDEN.store(true, Ordering::SeqCst); let mut su: libc::sigaction = std::mem::zeroed(); su.sa_sigaction = on_usr1 as *const () as usize; libc::sigaction(libc::SIGUSR1, &su, std::ptr::null_mut()); }
+        if args.hidden { HIDDEN.store(true, Ordering::SeqCst); }
+        let mut su: libc::sigaction = std::mem::zeroed(); su.sa_sigaction = on_usr1 as *const () as usize; libc::sigaction(libc::SIGUSR1, &su, std::ptr::null_mut());
+        su.sa_sigaction = on_usr2 as *const () as usize; libc::sigaction(libc::SIGUSR2, &su, std::ptr::null_mut());
     }
 
     let conn = Connection::connect_to_env().unwrap_or_else(|e| { eprintln!("wayland connect: {e}"); std::process::exit(1) });
@@ -444,6 +453,7 @@ fn main() {
     };
 
     let mut was_hidden = false;
+    let mut was_paused = false;
     while !STOP.load(Ordering::SeqCst) && !app.closed {
         if let Some(d) = args.duration { if start.elapsed().as_secs_f64() >= d { break; } }
         if dbg && st_t.elapsed() >= Duration::from_secs(2) { eprintln!("wallforge-render: sleeps {} blocking polls {} shown {} in 2s", st_to, st_ev, shown); st_to = 0; st_ev = 0; st_t = Instant::now(); }
@@ -454,6 +464,9 @@ fn main() {
             if t >= 3.0 && t < 7.0 { if app.cb_ready { app.cb_ready = false; held_cb = true; } }
             else if held_cb { app.cb_ready = true; held_cb = false; }
         }
+        let paused = PAUSED.load(Ordering::SeqCst);
+        if paused { app.cb_ready = false; was_paused = true; }
+        else if was_paused { was_paused = false; app.cb_ready = true; dirty = true; }
         if app.resized {
             app.resized = false;
             ((bw, bh), is_native) = layout(&viewport, _fs.is_some(), app.frac, app.size, phys(app.size, app.frac), (dec.width, dec.height), native, args.scaling);
@@ -464,7 +477,7 @@ fn main() {
         }
         if was_hidden && !HIDDEN.load(Ordering::SeqCst) { was_hidden = false; app.cb_ready = true; dirty = true; first = false; last_render = Instant::now(); base_wall = last_render; base_pts = ring.back().map(|f| f.pts).unwrap_or(0.0); next_slot = base_wall; }
         let now = Instant::now();
-        if (app.cb_ready && now >= next_due) || (dirty && !first) {
+        if !paused && ((app.cb_ready && now >= next_due) || (dirty && !first)) {
             if now.duration_since(last_render) > Duration::from_millis(500) && !first {
                 base_wall = now; // woke from pause: continue where we stopped, do not fast-forward
                 base_pts = ring.back().map(|f| f.pts).unwrap_or(0.0);
@@ -556,6 +569,7 @@ fn main() {
             let sleep_only = !app.cb_ready && !first && next_due > now && last_render.elapsed() < period * 3;
             let timeout_ms = if sleep_only { let r = next_due - now; let t = r.as_micros().div_ceil(1000).clamp(1, 3_600_000) as i32; if timeout_ms >= 0 { t.min(timeout_ms) } else { t } } else { timeout_ms };
             let r = unsafe { libc::poll(fds.as_mut_ptr().add(sleep_only as usize), 2 - sleep_only as libc::nfds_t, timeout_ms) };
+            if r > 0 && fds[1].revents != 0 { let mut junk = [0u8; 16]; unsafe { libc::read(sig_pipe[0], junk.as_mut_ptr() as *mut _, 16); } } // USR1/USR2 wake-ups: drain, or poll() spins
             if dbg { if sleep_only { st_to += 1 } else { st_ev += 1 } }
             if sleep_only && r >= 0 { fds[0].revents = libc::POLLIN; }
             if (r > 0 || sleep_only) && fds[0].revents != 0 {
