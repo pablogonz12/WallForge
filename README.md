@@ -311,6 +311,7 @@ WallForge opens the item's Workshop page and you click **Unsubscribe** there.
 | `wallforge` | The app. |
 | `wallforge --daemon` | Session supervisor started at login (systemd user unit, XDG autostart, niri spawn-at-startup); single instance. |
 | `wallforge --restore` | Re-apply the saved wallpapers once and exit. |
+| `wallforge --reload` | Replace every running wallpaper with one from the installed renderer (an update keeps the old one alive by design). |
 | `wallforge --doctor` | Check the setup (Wayland, layer-shell, GTK, assets, renderer, decode) and exit; read-only, no display needed, exit code 1 when something is broken. |
 | `wallforge --import-we [FILE] [--dry-run]` | Import Wallpaper Engine's settings. |
 | `wallforge --commons [QUERY] [--topic NAME] [--get N]` | Search Wikimedia Commons videos; `--get N` imports result N. |
