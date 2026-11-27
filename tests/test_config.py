@@ -70,6 +70,40 @@ class ConfigTest(unittest.TestCase):
         cfg.reset_values("42")
         self.assertEqual(cfg.values_for("42"), {})
 
+    def test_explicit_output_removal_writes_both_fields_and_is_not_resurrected(self):
+        cfg = config.Config()
+        cfg.data["outputs"] = {"DP-1": {"id": "1"}}
+        cfg.data["displaced_outputs"] = [{"connector": "DP-2", "entry": {"id": "2", "ident": "B"}}]
+        cfg.save()
+        stale = config.Config()
+        newer = config.Config()
+        newer.data["displaced_outputs"] = [{"connector": "DP-3", "entry": {"id": "3", "ident": "C"}}]
+        newer.save()
+        stale.data["outputs"].clear()
+        stale.save()  # an explicit change writes both of this instance's fields
+        result = config.Config()
+        self.assertEqual(result.data["outputs"], {})
+        self.assertEqual(result.data["displaced_outputs"], stale.data["displaced_outputs"])
+        newer.data["window"]["w"] = 900
+        newer.save()  # its unchanged assignment snapshot must not restore the removal
+        result = config.Config()
+        self.assertEqual(result.data["outputs"], {})
+        self.assertEqual(result.data["displaced_outputs"], stale.data["displaced_outputs"])
+
+    def test_explicit_displaced_removal_writes_both_fields(self):
+        cfg = config.Config()
+        cfg.data["outputs"] = {"DP-1": {"id": "1"}}
+        cfg.data["displaced_outputs"] = [{"connector": "DP-2", "entry": {"id": "2", "ident": "B"}}]
+        cfg.save()
+        stale = config.Config()
+        cfg.data["outputs"] = {"DP-3": {"id": "3"}}
+        cfg.save()
+        stale.data["displaced_outputs"].clear()
+        stale.save()
+        result = config.Config()
+        self.assertEqual(result.data["outputs"], {"DP-1": {"id": "1"}})
+        self.assertEqual(result.data["displaced_outputs"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,37 +15,149 @@ def live(*pairs):
 
 class ResolveTests(unittest.TestCase):
     def test_connector_wins_when_identity_agrees(self):
-        m, out = daemon.resolve({"DP-2": {"id": "1", "ident": "A|x|1"}}, live(("DP-2", "A|x|1")))
+        m, out, _ = daemon.resolve_state({"DP-2": {"id": "1", "ident": "A|x|1"}}, [], live(("DP-2", "A|x|1")))
         self.assertEqual(m["DP-2"]["id"], "1")
 
     def test_legacy_entry_without_ident_matches_by_connector_and_learns_it(self):
-        m, out = daemon.resolve({"DP-2": {"id": "1"}}, live(("DP-2", "A|x|1")))
+        m, out, _ = daemon.resolve_state({"DP-2": {"id": "1"}}, [], live(("DP-2", "A|x|1")))
         self.assertEqual(m["DP-2"]["id"], "1")
         self.assertEqual(out["DP-2"]["ident"], "A|x|1")
 
+    def test_missing_live_identity_still_matches_connector_without_erasing_identity(self):
+        m, out, _ = daemon.resolve_state({"DP-2": {"id": "1", "ident": "A"}}, [], live(("DP-2", "")))
+        self.assertEqual(m["DP-2"]["id"], "1")
+        self.assertEqual(out["DP-2"]["ident"], "A")
+
     def test_renumbered_connectors_follow_identity(self):
         saved = {"DP-3": {"id": "1", "ident": "A|x|1"}, "DP-5": {"id": "2", "ident": "B|y|2"}}
-        m, out = daemon.resolve(saved, live(("DP-3", "B|y|2"), ("DP-5", "A|x|1")))
+        m, out, _ = daemon.resolve_state(saved, [], live(("DP-3", "B|y|2"), ("DP-5", "A|x|1")))
         self.assertEqual(m["DP-3"]["id"], "2")
         self.assertEqual(m["DP-5"]["id"], "1")
         self.assertEqual(out["DP-3"]["id"], "2")  # config is re-keyed to the live names
 
     def test_moved_monitor_is_found_by_identity(self):
-        m, out = daemon.resolve({"DP-3": {"id": "1", "ident": "A|x|1"}}, live(("DP-7", "A|x|1")))
+        m, out, _ = daemon.resolve_state({"DP-3": {"id": "1", "ident": "A|x|1"}}, [], live(("DP-7", "A|x|1")))
         self.assertEqual(m["DP-7"]["id"], "1")
         self.assertNotIn("DP-3", out)
 
     def test_different_monitor_on_same_connector_is_not_matched(self):
-        m, _ = daemon.resolve({"DP-3": {"id": "1", "ident": "A|x|1"}}, live(("DP-3", "C|z|9")))
+        m, _, _ = daemon.resolve_state({"DP-3": {"id": "1", "ident": "A|x|1"}}, [], live(("DP-3", "C|z|9")))
         self.assertEqual(m, {})
 
     def test_unplugged_assignment_is_kept(self):
-        _, out = daemon.resolve({"DP-3": {"id": "1", "ident": "A|x|1"}}, live(("DP-2", "B|y|2")))
+        _, out, _ = daemon.resolve_state({"DP-3": {"id": "1", "ident": "A|x|1"}}, [], live(("DP-2", "B|y|2")))
         self.assertIn("DP-3", out)
+
+    def test_disconnected_monitor_returns_after_its_connector_was_reused(self):
+        saved = {"DP-3": {"id": "1", "ident": "A"}, "DP-5": {"id": "2", "ident": "B"}}
+        matched, persisted, _ = daemon.resolve_state(saved, [], live(("DP-3", "B")))
+        self.assertEqual(matched["DP-3"]["id"], "2")
+        self.assertEqual(persisted["DP-3"]["id"], "2")
+
+    def test_collision_chain_rekeys_and_preserves_unplugged_assignment(self):
+        saved = {"DP-1": {"id": "1", "ident": "A"}, "DP-2": {"id": "2", "ident": "B"},
+                 "DP-3": {"id": "3", "ident": "C"}}
+        matched, persisted, dormant = daemon.resolve_state(saved, [], live(("DP-1", "B"), ("DP-2", "C")))
+        self.assertEqual({n: e["id"] for n, e in matched.items()}, {"DP-1": "2", "DP-2": "3"})
+        self.assertEqual({n: e["id"] for n, e in persisted.items()}, {"DP-1": "2", "DP-2": "3"})
+        _, persisted, dormant = daemon.resolve_state(persisted, dormant, live(("DP-1", "B"), ("DP-2", "C"), ("DP-4", "A")))
+        self.assertEqual({n: e["id"] for n, e in persisted.items()}, {"DP-4": "1", "DP-1": "2", "DP-2": "3"})
+        self.assertEqual(dormant, [])
+
+    def test_persist_keeps_disconnected_assignment_on_disk(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "config.json"
+            with mock.patch.object(config, "CONFIG_DIR", Path(d)), mock.patch.object(config, "CONFIG_FILE", path):
+                cfg = config.Config()
+                cfg.data["outputs"] = {"DP-3": {"id": "1", "ident": "A"}, "DP-5": {"id": "2", "ident": "B"}}
+                cfg.save()
+                daemon._persist(live(("DP-3", "B")))
+                self.assertEqual(config.Config().data["outputs"]["DP-3"]["id"], "2")
+                daemon._persist(live(("DP-7", "A"), ("DP-3", "B")))
+                saved = config.Config().data["outputs"]
+                self.assertEqual({n: e["id"] for n, e in saved.items()}, {"DP-7": "1", "DP-3": "2"})
+
+    def test_edit_after_collision_with_stale_window_preserves_displaced_assignment(self):
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.object(config, "CONFIG_DIR", Path(d)), mock.patch.object(config, "CONFIG_FILE", Path(d) / "config.json"):
+                cfg = config.Config()
+                cfg.data["outputs"] = {"DP-3": {"id": "1", "ident": "A", "extra": 7},
+                                       "DP-5": {"id": "2", "ident": "B"}}
+                cfg.save()
+                window_cfg = config.Config()
+                daemon._persist(live(("DP-3", "B")))
+                fresh = config.Config()
+                self.assertEqual(fresh.data["outputs"]["DP-3"]["id"], "2")
+                self.assertNotIn("DP-5", fresh.data["outputs"])
+                window_cfg.update_outputs({}, live(("DP-3", "B")))  # apply's initial save
+                window_cfg.update_outputs({"DP-3": {"id": "3", "ident": "B"}}, live(("DP-3", "B")))
+                daemon._persist(live(("DP-7", "A"), ("DP-3", "B")))
+                result = config.Config().data
+                self.assertEqual(result["outputs"], {"DP-7": {"id": "1", "ident": "A", "extra": 7},
+                                                      "DP-3": {"id": "3", "ident": "B"}})
+                self.assertEqual(result["displaced_outputs"], [])
+
+    def test_stale_window_settings_save_preserves_daemon_output_changes(self):
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.object(config, "CONFIG_DIR", Path(d)), mock.patch.object(config, "CONFIG_FILE", Path(d) / "config.json"):
+                cfg = config.Config()
+                cfg.data["outputs"] = {"DP-3": {"id": "1", "ident": "A"}, "DP-5": {"id": "2", "ident": "B"}}
+                cfg.save()
+                stale = config.Config()
+                daemon._persist(live(("DP-3", "B")))
+                expected = config.Config().data
+                stale.data["window"]["w"] = 900
+                stale.save()
+                result = config.Config().data
+                self.assertEqual(result["window"]["w"], 900)
+                self.assertEqual(result["outputs"], expected["outputs"])
+                self.assertEqual(result["displaced_outputs"], expected["displaced_outputs"])
+
+    def test_explicit_apply_can_restore_the_windows_original_assignments(self):
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.object(config, "CONFIG_DIR", Path(d)), mock.patch.object(config, "CONFIG_FILE", Path(d) / "config.json"):
+                window_cfg = config.Config()
+                saved = {"DP-3": {"id": "1", "ident": "A"}, "DP-5": {"id": "2", "ident": "B"}}
+                window_cfg.data["outputs"] = saved
+                window_cfg.save()
+                daemon._persist(live(("DP-3", "B")))
+                window_cfg.update_outputs({"DP-3": saved["DP-3"]}, live(("DP-3", "A"), ("DP-5", "B")))
+                restored = config.Config().data
+                self.assertEqual(restored["outputs"], saved)
+                self.assertEqual(restored["displaced_outputs"], [])
+
+    def test_new_monitor_without_saved_assignment_does_not_overwrite_unplugged_one(self):
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.object(config, "CONFIG_DIR", Path(d)), mock.patch.object(config, "CONFIG_FILE", Path(d) / "config.json"):
+                cfg = config.Config()
+                cfg.data["outputs"] = {"DP-3": {"id": "1", "ident": "A"}}
+                cfg.save()
+                daemon._persist(live(("DP-3", "B")))
+                cfg.update_outputs({"DP-3": {"id": "3", "ident": "B"}}, live(("DP-3", "B")))
+                daemon._persist(live(("DP-7", "A"), ("DP-3", "B")))
+                self.assertEqual(config.Config().data["outputs"], {"DP-7": {"id": "1", "ident": "A"},
+                                                                   "DP-3": {"id": "3", "ident": "B"}})
+
+    def test_removing_active_assignment_does_not_resurrect_it(self):
+        saved = {"DP-3": {"id": "1", "ident": "A"}, "DP-5": {"id": "2", "ident": "B"}}
+        _, saved, displaced = daemon.resolve_state(saved, [], live(("DP-3", "B")))
+        saved.pop("DP-3")
+        matched, saved, displaced = daemon.resolve_state(saved, displaced, live(("DP-3", "B"), ("DP-7", "A")))
+        self.assertEqual(matched, {"DP-7": {"id": "1", "ident": "A"}})
+        self.assertEqual(saved, matched)
+        self.assertEqual(displaced, [])
+
+    def test_displaced_twins_prefer_their_last_connector(self):
+        dormant = [{"connector": "DP-1", "entry": {"id": "1", "ident": "A"}},
+                   {"connector": "DP-2", "entry": {"id": "2", "ident": "A"}}]
+        matched, saved, displaced = daemon.resolve_state({}, dormant, live(("DP-2", "A"), ("DP-1", "A")))
+        self.assertEqual({n: e["id"] for n, e in matched.items()}, {"DP-1": "1", "DP-2": "2"})
+        self.assertEqual(saved, matched)
+        self.assertEqual(displaced, [])
 
     def test_identical_twins_use_connectors_and_each_entry_once(self):
         saved = {"DP-1": {"id": "1", "ident": "A|x|"}, "DP-2": {"id": "2", "ident": "A|x|"}}
-        m, _ = daemon.resolve(saved, live(("DP-1", "A|x|"), ("DP-2", "A|x|")))
+        m, _, _ = daemon.resolve_state(saved, [], live(("DP-1", "A|x|"), ("DP-2", "A|x|")))
         self.assertEqual((m["DP-1"]["id"], m["DP-2"]["id"]), ("1", "2"))
 
     def test_make_ident_drops_unknowns(self):
@@ -171,6 +283,13 @@ class SupervisorTests(unittest.TestCase):
         self.live = live(("DP-5", "A"))
         self.tick()
         self.assertEqual(self.eng.started, ["DP-5"])
+
+    def test_displaced_assignment_can_start_when_monitor_returns(self):
+        self.cfg.data["outputs"] = {}
+        self.cfg.data["displaced_outputs"] = [{"connector": "DP-3", "entry": {"id": "1", "ident": "A"}}]
+        self.live = live(("DP-7", "A"))
+        self.tick()
+        self.assertEqual(self.eng.started, ["DP-7"])
 
     def test_stacking_guard_recreates_once_then_rate_limits(self):
         self.eng.alive.update({"DP-2", "HDMI-A-2"})

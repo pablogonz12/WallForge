@@ -51,6 +51,7 @@ DEFAULTS = {
         "fullscreen_pause_only_active": True,
     },
     "outputs": {},  # connector -> {"id": item id, "ident": "make|model|serial"}
+    "displaced_outputs": [],  # assignments whose connector is occupied by a different monitor
     "values": {},  # item id -> {property: value} user overrides
     "volumes": {},  # item id -> 0..100, the wallpaper's own volume (scaled by the global one)
     "favorites": [],
@@ -83,6 +84,7 @@ class Config:
             self.data = _merge(DEFAULTS, {})
         except Exception:
             self.data = _merge(DEFAULTS, {})
+        self._output_snapshot = self._output_state()
         if self.data.get("version", 1) < 2:  # v2: crop ("fill") became the default scaling
             if self.data["engine"].get("scaling") == "default":
                 self.data["engine"]["scaling"] = "fill"
@@ -106,12 +108,42 @@ class Config:
             self.data["version"] = 6
             self.save()
 
+    def _output_state(self):
+        return copy.deepcopy((self.data.get("outputs", {}), self.data.get("displaced_outputs", [])))
+
     def save(self):
+        # A settings-only save from a long-lived window must not undo daemon
+        # re-keying. Explicit changes to either field write the pair as a unit.
+        if self._output_state() == self._output_snapshot:
+            try:
+                with open(CONFIG_FILE, encoding="utf-8") as fh:
+                    latest = json.load(fh)
+                if isinstance(latest, dict):
+                    self.data["outputs"] = latest.get("outputs", {})
+                    self.data["displaced_outputs"] = latest.get("displaced_outputs", [])
+            except (OSError, ValueError):
+                pass
+        self._write()
+
+    def _write(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=CONFIG_DIR, prefix="config.", suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(self.data, fh, indent=2, sort_keys=True)
         os.replace(tmp, CONFIG_FILE)
+        self._output_snapshot = self._output_state()
+
+    def update_outputs(self, assignments: dict, live: list[dict]):
+        """Save an apply using fresh output state, without replacing other window settings."""
+        from .daemon import resolve_state
+
+        fresh = Config()
+        _, outputs, displaced = resolve_state(fresh.data.get("outputs", {}),
+                                              fresh.data.get("displaced_outputs", []), live)
+        outputs.update(assignments)
+        self.data["outputs"] = outputs
+        self.data["displaced_outputs"] = displaced
+        self._write()
 
     # convenience
     def values_for(self, item_id: str) -> dict:

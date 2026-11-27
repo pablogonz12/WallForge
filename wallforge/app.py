@@ -557,16 +557,17 @@ class Window(Adw.ApplicationWindow):
                     msg = "The renderer is not built: see the banner at the top"
                 self.toasts.add_toast(Adw.Toast(title=msg))
                 return
-        self.cfg.save()
+        self.cfg.update_outputs({}, list(mons.values()))
 
         def work():
             err = ""
             try:
+                assignments = {}
                 for o in outputs:
                     engine.start(self.cfg, it, o)
-                    self.cfg.data["outputs"][o] = {"id": it.id, "ident": mons.get(o, {}).get("ident", "")}
+                    assignments[o] = {"id": it.id, "ident": mons.get(o, {}).get("ident", "")}
                     self._remember(o, it.id)
-                self.cfg.save()
+                self.cfg.update_outputs(assignments, list(mons.values()))
                 if sync and outputs:
                     theme.sync(self.cfg, it, outputs[0] if len(outputs) == 1 else None)
                 if self.cfg.data["engine"].get("preload_next", True) and not quiet:
