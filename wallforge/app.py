@@ -1461,8 +1461,10 @@ class Window(Adw.ApplicationWindow):
         switch("Pause wallpapers on battery", "pause_on_battery")
         switch("Disable audio capture for visualisers", "no_audio_processing",
                "On: scene wallpapers that react to music stay still instead of capturing the sound your system plays.")
-        switch("Disable mouse interaction", "disable_mouse")
-        switch("Disable parallax", "disable_parallax")
+        switch("Disable mouse interaction", "disable_mouse",
+               "Applies to web wallpapers and the legacy renderer. Native scene and video wallpapers do not accept mouse input.")
+        switch("Disable parallax", "disable_parallax",
+               "Applies only to the legacy renderer.")
         switch("Keep playing under fullscreen apps", "no_fullscreen_pause")
         switch("Pause only for the active fullscreen window", "fullscreen_pause_only_active")
 
