@@ -100,14 +100,17 @@ Settings that trade a little sharpness for a lot less GPU time:
   filtering. Videos and web wallpapers always play at native resolution. 100% is the default; 75% is a good
   compromise on a laptop or a shared GPU, 50% makes a heavy scene comfortable on an integrated GPU.
 - **Frame rate limit**: 30 fps by default (5–240). 24 is enough for most wallpapers and nearly halves the work of 60.
-- **Disable particles**, **Disable parallax**, **Disable mouse interaction**: turn off the effects that cost the most
-  and that you are least likely to notice under your windows.
+- **Disable particles**: turn off particles in native scene wallpapers and the legacy renderer.
 - **Reduce frame rate and resolution on battery**: while discharging, the limit drops to 30 fps and the render scale to
   75% at most, without touching your settings.
 - **Preload the next wallpaper**: the next pick (rotation, Ctrl+Shift+N) is loaded behind the current one, so the
   switch is one frame (~30 ms) instead of a load. It costs that wallpaper's memory while it waits; turn it off if your
   GPU is short on memory.
 - **Pause wallpapers on battery**: stops every wallpaper while discharging and brings them back when you plug in.
+
+Input settings depend on the renderer: **Disable mouse interaction** applies to web wallpapers and the legacy
+renderer; native scene and video wallpapers do not accept mouse input. **Disable parallax** applies only to the
+legacy renderer.
 
 If a wallpaper stops on its own, WallForge restarts it; after three failures in five minutes it leaves the screen idle
 and says so in the playing bar instead of looping on a crash.
