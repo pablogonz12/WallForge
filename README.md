@@ -198,7 +198,7 @@ registrations from time to time); build it with `makepkg -si` from that folder i
 ```bash
 # Arch / CachyOS
 sudo pacman -S python-gobject gtk4 libadwaita python-pillow python-aiohttp ffmpeg libva rust clang \
-               webkitgtk-6.0 gtk4-layer-shell
+               webkitgtk-6.0 gtk4-layer-shell rsync
 git clone https://github.com/pgm1207/WallForge
 cd WallForge
 ./install.sh        # builds the renderer (about a minute), adds a menu entry and icon
@@ -206,7 +206,8 @@ cd WallForge
 ```
 
 `install.sh` installs into `~/.local/opt/wallforge`, adds a `wallforge` command, the menu entry and the login
-service, and builds the renderer. The checkout stays the source of truth, so updates keep working.
+service, and builds the renderer. It uses `rsync` to copy files from the checkout into the install directory.
+The checkout stays the source of truth, so updates keep working.
 
 ### Update
 
@@ -228,8 +229,8 @@ On other distributions, install the same pieces from your package manager:
 
 | Distribution | Packages |
 |---|---|
-| Fedora | `python3-gobject gtk4 libadwaita python3-pillow python3-aiohttp ffmpeg-free rust cargo clang libva-devel mesa-libEGL webkitgtk6.0 gtk4-layer-shell` |
-| Debian 13+ / recent Ubuntu | `python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-pil python3-aiohttp ffmpeg cargo clang libva-dev libegl1`, plus `libgtk4-layer-shell0 gir1.2-gtk4layershell-1.0` for web wallpapers |
+| Fedora | `python3-gobject gtk4 libadwaita python3-pillow python3-aiohttp ffmpeg-free rust cargo clang libva-devel mesa-libEGL webkitgtk6.0 gtk4-layer-shell rsync` |
+| Debian 13+ / recent Ubuntu | `python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-pil python3-aiohttp ffmpeg cargo clang libva-dev libegl1 rsync`, plus `libgtk4-layer-shell0 gir1.2-gtk4layershell-1.0` for web wallpapers |
 
 Names drift between releases and only the Arch list is exercised in CI, so run `wallforge --doctor` afterwards: it
 names whichever piece is missing instead of making you guess.
