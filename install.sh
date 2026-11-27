@@ -15,24 +15,34 @@ data="${XDG_DATA_HOME:-$HOME/.local/share}"
 bin="${XDG_BIN_HOME:-$HOME/.local/bin}"
 here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 build=1
+update=0
 
 for arg in "$@"; do
   case "$arg" in
-    --from-git)
-      if [ -d "$here/.git" ]; then
-        echo "Updating the checkout in $here..."
-        git -C "$here" pull --ff-only
-      fi ;;
+    --from-git) update=1 ;;
     --no-build) build=0 ;;
     -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "install.sh: unknown option $arg (try --help)" >&2; exit 2 ;;
   esac
 done
 
+copy=0
+if [ "$here" != "$(readlink -m -- "$PREFIX")" ]; then
+  copy=1
+  if ! command -v rsync >/dev/null; then
+    echo "install.sh: install rsync with your package manager, then rerun this installer." >&2
+    exit 1
+  fi
+fi
+if [ "$update" = 1 ] && [ -d "$here/.git" ]; then
+  echo "Updating the checkout in $here..."
+  git -C "$here" pull --ff-only
+fi
+
 echo "Installing into $PREFIX"
 mkdir -p "$PREFIX"
 # Copy the sources over an existing install, keeping its .git (updates), the built renderer (target/) and caches.
-if [ "$(readlink -f "$here")" != "$(readlink -f "$PREFIX")" ]; then
+if [ "$copy" = 1 ]; then
   for d in wallforge render data assets gnome-extension docs packaging tests tools; do
     [ -e "$here/$d" ] || continue
     mkdir -p "$PREFIX/$d"
