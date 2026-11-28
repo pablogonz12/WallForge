@@ -8,6 +8,7 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
   <a href="https://pgm1207.github.io/WallForge/"><img src="https://img.shields.io/badge/Arch-pacman%20repo-blue" alt="Arch pacman repository"></a>
   <img src="https://img.shields.io/badge/Wayland-layer--shell-6e56cf" alt="Wayland layer-shell">
+  <a href="https://scorecard.dev/viewer/?uri=github.com/pablogonz12/WallForge"><img src="https://api.scorecard.dev/projects/github.com/pablogonz12/WallForge/badge" alt="OpenSSF Scorecard"></a>
 </p>
 
 <p align="center"><img src="assets/demo-app.gif" alt="WallForge on niri: opening the library and switching between Wallpaper Engine wallpapers" width="760"></p>
