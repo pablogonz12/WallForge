@@ -150,8 +150,10 @@ def import_web(path: Path) -> Path:
     return d
 
 
-def safe_extract(zf: zipfile.ZipFile, dest: Path, max_bytes: int = MAX_UNPACKED) -> None:
-    """Extract regular files only; reject absolute paths, '..', and oversized archives."""
+def safe_extract(zf: zipfile.ZipFile, dest: Path, max_bytes: int | None = None) -> None:
+    """Extract regular files only; reject absolute paths, '..', and oversized archives (default cap: MAX_UNPACKED)."""
+    if max_bytes is None:
+        max_bytes = MAX_UNPACKED
     infos = zf.infolist()
     if len(infos) > MAX_FILES:
         raise ImportError_("Archive has too many files")
