@@ -10,10 +10,13 @@ would double the disk use. Move or delete the original and the item shows as bro
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -86,6 +89,37 @@ def _thumb(src: Path, dest: Path, video: bool = True) -> str | None:
         return None
 
 
+def _web_thumb(d: Path) -> str | None:
+    """Render only on a disposable X server, never on the user's desktop."""
+    try:
+        from . import webplayer
+        if "webkitgtk" in webplayer.available():  # screenshot mode is a normal window: layer-shell not needed
+            return None
+        xvfb = shutil.which("xvfb-run")
+        if not xvfb or not shutil.which("Xvfb"):
+            return None
+        with tempfile.TemporaryDirectory() as tmp:
+            png = Path(tmp) / "snapshot.png"
+            cmd = [xvfb, "-a", "-s", "-screen 0 960x540x24", sys.executable, "-m", "wallforge.webplayer", "--bg", str(d),
+                   "--window", "960x540", "--silent", "--screenshot", str(png)]
+            env = os.environ.copy()
+            env["GDK_BACKEND"] = "x11"
+            env.pop("WAYLAND_DISPLAY", None)
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    start_new_session=True, env=env)
+            try:
+                rc = proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=2)
+                return None
+            if rc or not png.is_file():
+                return None
+            return _thumb(png, d / "preview.jpg", video=False)
+    except Exception:
+        return None
+
+
 def _meta(d: Path, data: dict, preview: str | None) -> dict:
     if preview:
         data["preview"] = preview
@@ -143,7 +177,12 @@ def import_web(path: Path) -> Path:
     try:
         shutil.copytree(src, d, dirs_exist_ok=True, symlinks=False)
         prev = next((p.name for p in d.glob("preview.*") if p.is_file()), None)
-        _write_project(d, _meta(d, {"type": "web", "file": entry, "title": src.name, "source": "Local"}, prev))
+        project = {"type": "web", "file": entry, "title": src.name, "source": "Local"}
+        _write_project(d, _meta(d, project, prev))
+        if not prev:
+            prev = _web_thumb(d)
+            if prev:
+                _write_project(d, _meta(d, project, prev))
     except Exception:
         shutil.rmtree(d, ignore_errors=True)
         raise
@@ -251,6 +290,11 @@ def import_lively(path: Path) -> Path:
                     if p:
                         proj["preview"] = p
             _write_project(d, proj)
+            if proj["lively_type"] in ("web", "webaudio") and not proj.get("preview"):
+                p = _web_thumb(d)
+                if p:
+                    proj["preview"] = p
+                    _write_project(d, proj)
         except Exception:
             shutil.rmtree(d, ignore_errors=True)
             raise
