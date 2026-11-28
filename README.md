@@ -288,8 +288,9 @@ Items live in `~/.local/share/wallforge/library/local-*/` with a normal `project
 ### Wikimedia Commons
 
 Discover has a source selector: **Wallpaper Engine Workshop** or **Wikimedia Commons**. Commons offers free videos
-(landscape, 720p or more) from categories such as nature, time-lapse, clouds, waterfalls and cities. No account or key
-is needed. Only files under public domain, CC0, CC BY and CC BY-SA licences are listed. The card and the detail page show
+(landscape, 720p or more) from topics such as nature, time-lapse, waterfalls, oceans, snow, fire and Earth from
+space; each topic includes its subcategories. No account or key is needed. Only files under public domain, CC0,
+CC BY and CC BY-SA licences are listed. The card and the detail page show
 the licence and the author, and **Download** copies the 1080p WebM into your library with the licence, author and a ready
 attribution line (CC BY / BY-SA ask you to credit the author if you share or show it). Search from a terminal with
 `wallforge --commons [QUERY] [--topic Waterfalls] [--get N]`. WallForge identifies itself with a generic User-Agent,

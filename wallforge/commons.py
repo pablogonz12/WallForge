@@ -10,6 +10,7 @@ import html
 import json
 import re
 import shutil
+import sys
 import tempfile
 import time
 import urllib.error
@@ -28,7 +29,8 @@ MIN_RATIO = 1.4  # landscape only
 MIN_SECONDS = 3
 MAX_DOWNLOAD = 500 * 1024 ** 2
 
-# Dropdown label -> Commons category (searched with incategory:, not recursive)
+# Dropdown label -> Commons category, searched with deepcat: so files filed in subcategories
+# ("Videos of waterfalls in Norway") are found too
 TOPICS = {
     "Nature": "Videos of nature",
     "Time-lapse": "Time-lapse videos",
@@ -36,6 +38,16 @@ TOPICS = {
     "Waterfalls": "Videos of waterfalls",
     "Forests": "Videos of forests",
     "Mountains": "Videos of mountains",
+    "Oceans": "Videos of oceans",
+    "Beaches": "Videos of beaches",
+    "Lakes": "Videos of lakes",
+    "Rivers": "Videos of rivers",
+    "Rain": "Videos of rain",
+    "Snow": "Videos of snow",
+    "Fire": "Videos of fire",
+    "Sunsets": "Videos of sunsets",
+    "Night": "Videos of night",
+    "Earth from space": "Videos of Earth from space",
     "Cities": "Videos of cities",
     "Fish": "Videos of fish",
 }
@@ -125,10 +137,10 @@ def parse(data: dict) -> list[dict]:
 
 def browse(query: str = "", topic: str = "Nature", page: int = 1) -> dict:
     cat = TOPICS.get(topic, TOPICS["Nature"])
-    search = f'filetype:video incategory:"{cat}"' + (f" {query}" if query else "")
+    search = f'filetype:video deepcat:"{cat}"' + (f" {query}" if query else "")
     data = _get({"action": "query", "generator": "search", "gsrsearch": search, "gsrnamespace": "6",
                  "gsrlimit": str(PAGE_SIZE), "gsroffset": str((max(page, 1) - 1) * PAGE_SIZE),
-                 "prop": "videoinfo", "viprop": "url|size|mime|duration|derivatives|extmetadata|user|thumbnail",
+                 "prop": "videoinfo", "viprop": "url|size|mime|derivatives|extmetadata|user",
                  "viurlwidth": "480"})
     return {"items": parse(data), "has_next": "continue" in data, "page": page}
 
@@ -191,6 +203,9 @@ def main(argv: list[str]) -> int:
             get = int(next(it, "0"))
         else:
             words.append(a)
+    if topic not in TOPICS:
+        print(f"Unknown topic {topic!r}. Topics: {', '.join(TOPICS)}", file=sys.stderr)
+        return 2
     res = browse(" ".join(words), topic)
     for i, r in enumerate(res["items"], 1):
         print(f"{i:2}. {r['title'][:60]} | {r['author'][:30]} | {r['license']} | {r['width']}x{r['height']} {r['duration']:.0f}s")

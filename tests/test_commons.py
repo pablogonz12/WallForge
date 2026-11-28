@@ -52,6 +52,38 @@ class Parse(unittest.TestCase):
         self.assertEqual(commons.parse({"batchcomplete": True}), [])
 
 
+class Query(unittest.TestCase):
+    def search(self, *args):
+        with mock.patch.object(commons, "_get", return_value={"batchcomplete": True}) as get:
+            commons.browse(*args)
+        return get.call_args.args[0]
+
+    def test_topic_searches_its_subcategories(self):
+        q = self.search("", "Mountains")
+        self.assertEqual(q["gsrsearch"], 'filetype:video deepcat:"Videos of mountains"')
+
+    def test_query_words_follow_the_category(self):
+        self.assertEqual(self.search("sunrise", "Waterfalls")["gsrsearch"],
+                         'filetype:video deepcat:"Videos of waterfalls" sunrise')
+
+    def test_new_topics(self):
+        for label, cat in [("Oceans", "Videos of oceans"), ("Snow", "Videos of snow"), ("Fire", "Videos of fire"),
+                           ("Earth from space", "Videos of Earth from space")]:
+            self.assertEqual(commons.TOPICS[label], cat)
+            self.assertIn(f'deepcat:"{cat}"', self.search("", label)["gsrsearch"])
+
+    def test_only_valid_videoinfo_props(self):
+        # Commons warns about "duration" and "thumbnail": size already returns the duration, viurlwidth the thumbnail.
+        self.assertEqual(self.search("", "Nature")["viprop"].split("|"),
+                         ["url", "size", "mime", "derivatives", "extmetadata", "user"])
+
+    def test_cli_rejects_unknown_topic(self):
+        with mock.patch.object(commons, "browse") as browse, mock.patch("sys.stderr") as err:
+            self.assertEqual(commons.main(["--topic", "Nope"]), 2)
+        browse.assert_not_called()
+        self.assertIn("Waterfalls", "".join(c.args[0] for c in err.write.call_args_list))
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
