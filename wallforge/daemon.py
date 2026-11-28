@@ -105,40 +105,58 @@ def discover_env():
 
 
 # ---------------------------------------------------------------- identity matching (pure)
-def resolve(saved: dict, live: list[dict]) -> tuple[dict, dict]:
-    """Match saved assignments {connector: {"id", "ident"?}} to the live outputs [{"name", "ident"}].
+def resolve_state(saved: dict, displaced: list, live: list[dict]) -> tuple[dict, dict, list]:
+    """Resolve connector assignments and displaced records without losing unplugged monitors.
 
-    Connector first, provided the identity agrees (or one side has none); the rest by identity. Each saved entry and each
-    output is used at most once. Returns ({live name: saved entry}, saved dict re-keyed to the live names with idents
-    filled in). Entries that match nothing are kept as they are, so an unplugged monitor keeps its wallpaper."""
-    entries = {k: dict(v) for k, v in saved.items() if isinstance(v, dict)}
-    match: dict[str, str] = {}  # live name -> saved key
-    taken: set[str] = set()
+    Displaced records retain their last connector and complete entry, but are not
+    exposed as connector keys to app/CLI readers. Connector matches take priority,
+    followed by identity matches; each entry and live output is used at most once.
+    """
+    entries = [(k, dict(v), False) for k, v in saved.items() if isinstance(v, dict)]
+    invalid = []
+    for record in displaced:
+        if (isinstance(record, dict) and isinstance(record.get("connector"), str)
+                and isinstance(record.get("entry"), dict)):
+            entries.append((record["connector"], dict(record["entry"]), record))
+        else:
+            invalid.append(record)
+    match: dict[str, int] = {}
+    taken: set[int] = set()
     for o in live:
-        e = entries.get(o["name"])
-        if e is not None and (not e.get("ident") or not o.get("ident") or e["ident"] == o["ident"]):
-            match[o["name"]] = o["name"]
-            taken.add(o["name"])
+        for i, (name, entry, _) in enumerate(entries):
+            if (i not in taken and name == o["name"] and
+                    (not entry.get("ident") or not o.get("ident") or entry["ident"] == o["ident"])):
+                match[o["name"]] = i
+                taken.add(i)
+                break
     for o in live:
         if o["name"] in match or not o.get("ident"):
             continue
-        for k, e in entries.items():
-            if k not in taken and e.get("ident") == o["ident"]:
-                match[o["name"]] = k
-                taken.add(k)
+        for i, (_, entry, _) in enumerate(entries):
+            if i not in taken and entry.get("ident") == o["ident"]:
+                match[o["name"]] = i
+                taken.add(i)
                 break
     out = {}
     for o in live:
-        k = match.get(o["name"])
-        if k is not None:
-            e = entries[k]
+        i = match.get(o["name"])
+        if i is not None:
+            entry = entries[i][1]
             if o.get("ident"):
-                e["ident"] = o["ident"]
-            out[o["name"]] = e
-    for k, e in entries.items():
-        if k not in taken and k not in out:  # unplugged: keep, unless its name is now someone else's
-            out[k] = e
-    return {n: entries[k] for n, k in match.items()}, out
+                entry["ident"] = o["ident"]
+            out[o["name"]] = entry
+    names = {o["name"] for o in live}
+    dormant = list(invalid)
+    for i, (name, entry, record) in enumerate(entries):
+        if i in taken:
+            continue
+        if record is not False:
+            dormant.append(record)
+        elif name in names or name in out:
+            dormant.append({"connector": name, "entry": entry})
+        else:
+            out[name] = entry
+    return {name: entries[i][1] for name, i in match.items()}, out, dormant
 
 
 # ---------------------------------------------------------------- stacking guard
@@ -211,7 +229,7 @@ class Supervisor:
     def tick(self, cfg, live: list[dict], layers) -> None:
         now = self.now()
         saved = cfg.data.get("outputs", {})
-        match, _ = resolve(saved, live)
+        match, _, _ = resolve_state(saved, cfg.data.get("displaced_outputs", []), live)
         paused = self.eng.pause_for_battery(cfg)
         for o in live:
             name = o["name"]
@@ -253,7 +271,7 @@ class Supervisor:
         """How long the loop may sleep: short while a wanted renderer is down and due (or about to be), else ``normal``."""
         now = self.now()
         saved = cfg.data.get("outputs", {})
-        match, _ = resolve(saved, live)
+        match, _, _ = resolve_state(saved, cfg.data.get("displaced_outputs", []), live)
         hint = normal
         for o in live:
             name = o["name"]
@@ -337,12 +355,14 @@ def _reap():
 
 def _persist(live: list[dict]):
     """Write idents / re-keyed connectors back, from a fresh read so a GUI save in between is not lost."""
-    fresh = config.Config()
-    _, fixed = resolve(fresh.data.get("outputs", {}), live)
-    if fixed != fresh.data.get("outputs"):
-        fresh.data["outputs"] = fixed
-        fresh.save()
-        log.info("saved outputs: %s", {k: v.get("ident", "") for k, v in fixed.items()})
+    with config.output_lock():
+        fresh = config.Config()
+        _, fixed, displaced = resolve_state(fresh.data.get("outputs", {}), fresh.data.get("displaced_outputs", []), live)
+        if fixed != fresh.data.get("outputs") or displaced != fresh.data.get("displaced_outputs", []):
+            fresh.data["outputs"] = fixed
+            fresh.data["displaced_outputs"] = displaced
+            fresh.save()
+            log.info("saved outputs: %s", {k: v.get("ident", "") for k, v in fixed.items()})
 
 
 def main() -> int:
