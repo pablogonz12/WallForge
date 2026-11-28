@@ -1559,13 +1559,22 @@ class Window(Adw.ApplicationWindow):
         dlg.open_multiple(self, None, done)
 
     def _do_import(self, files):
-        for f in files:
-            try:
-                d = importer.import_path(f)
-                self.toasts.add_toast(Adw.Toast(title=f"Added {d.name}"))
-            except Exception as e:
-                self.toasts.add_toast(Adw.Toast(title=f"Could not add {f.name}: {e}"))
-        self.reload_library()
+        def work():
+            messages = []
+            for f in files:
+                try:
+                    d = importer.import_path(f)
+                    messages.append(f"Added {d.name}")
+                except Exception as e:
+                    messages.append(f"Could not add {f.name}: {e}")
+
+            def done():
+                for message in messages:
+                    self.toasts.add_toast(Adw.Toast(title=message))
+                self.reload_library()
+                return False
+            GLib.idle_add(done)
+        threading.Thread(target=work, daemon=True).start()
 
     def _credit_box(self, raw: dict) -> Gtk.Box:
         """Licence, author and the attribution line (CC BY / BY-SA ask for it), with links."""

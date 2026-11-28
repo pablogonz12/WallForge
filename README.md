@@ -283,7 +283,8 @@ Wallpapers do not have to come from the Workshop. Click **+** in the header (or 
 - **HTML folder** (or an `index.html`): copied in as a web wallpaper.
 - **Lively `.zip`**: video, GIF, web and picture packages work. Lively app, Unity, Godot, URL and BizHawk wallpapers are refused with a message.
 
-Items live in `~/.local/share/wallforge/library/local-*/` with a normal `project.json`, show up in the grid, and can be uninstalled from their detail panel. Every card carries a source badge (Wallpaper Engine, Lively, Local, Wikimedia) and the Library has a source filter. A preview is made with `ffmpeg` when it is installed. Only add packages you trust: web wallpapers run as web pages.
+Items live in `~/.local/share/wallforge/library/local-*/` with a normal `project.json`, show up in the grid, and can be uninstalled from their detail panel. Every card carries a source badge (Wallpaper Engine, Lively, Local, Wikimedia) and the Library has a source filter. A preview is made with `ffmpeg` when it is installed; web wallpapers without their own preview are also
+photographed on a hidden virtual display when `xvfb-run` is available (Arch: `xorg-server-xvfb`), never on your desktop. Only add packages you trust: web wallpapers run as web pages.
 
 ### Wikimedia Commons
 
