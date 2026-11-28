@@ -355,13 +355,14 @@ def _reap():
 
 def _persist(live: list[dict]):
     """Write idents / re-keyed connectors back, from a fresh read so a GUI save in between is not lost."""
-    fresh = config.Config()
-    _, fixed, displaced = resolve_state(fresh.data.get("outputs", {}), fresh.data.get("displaced_outputs", []), live)
-    if fixed != fresh.data.get("outputs") or displaced != fresh.data.get("displaced_outputs", []):
-        fresh.data["outputs"] = fixed
-        fresh.data["displaced_outputs"] = displaced
-        fresh.save()
-        log.info("saved outputs: %s", {k: v.get("ident", "") for k, v in fixed.items()})
+    with config.output_lock():
+        fresh = config.Config()
+        _, fixed, displaced = resolve_state(fresh.data.get("outputs", {}), fresh.data.get("displaced_outputs", []), live)
+        if fixed != fresh.data.get("outputs") or displaced != fresh.data.get("displaced_outputs", []):
+            fresh.data["outputs"] = fixed
+            fresh.data["displaced_outputs"] = displaced
+            fresh.save()
+            log.info("saved outputs: %s", {k: v.get("ident", "") for k, v in fixed.items()})
 
 
 def main() -> int:

@@ -2,13 +2,36 @@
 from __future__ import annotations
 
 import copy
+import fcntl
 import json
 import os
 import tempfile
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "wallforge"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+_output_mutex = threading.RLock()
+_lock_state = threading.local()
+
+
+@contextmanager
+def output_lock():
+    """Serialize config read/modify/write across threads and processes, including nested saves."""
+    with _output_mutex:
+        if getattr(_lock_state, "held", False):
+            yield
+            return
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_DIR / "config.lock", "a+") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            _lock_state.held = True
+            try:
+                yield
+            finally:
+                _lock_state.held = False
+                fcntl.flock(fh, fcntl.LOCK_UN)
 
 DEFAULTS = {
     "version": 6,
@@ -112,6 +135,10 @@ class Config:
         return copy.deepcopy((self.data.get("outputs", {}), self.data.get("displaced_outputs", [])))
 
     def save(self):
+        with output_lock():
+            self._save_locked()
+
+    def _save_locked(self):
         # A settings-only save from a long-lived window must not undo daemon
         # re-keying. Explicit changes to either field write the pair as a unit.
         if self._output_state() == self._output_snapshot:
@@ -137,13 +164,14 @@ class Config:
         """Save an apply using fresh output state, without replacing other window settings."""
         from .daemon import resolve_state
 
-        fresh = Config()
-        _, outputs, displaced = resolve_state(fresh.data.get("outputs", {}),
-                                              fresh.data.get("displaced_outputs", []), live)
-        outputs.update(assignments)
-        self.data["outputs"] = outputs
-        self.data["displaced_outputs"] = displaced
-        self._write()
+        with output_lock():
+            fresh = Config()
+            _, outputs, displaced = resolve_state(fresh.data.get("outputs", {}),
+                                                  fresh.data.get("displaced_outputs", []), live)
+            outputs.update(assignments)
+            self.data["outputs"] = outputs
+            self.data["displaced_outputs"] = displaced
+            self._write()
 
     # convenience
     def values_for(self, item_id: str) -> dict:
