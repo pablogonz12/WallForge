@@ -81,6 +81,104 @@ class ZipSlipTest(Base):
         with zipfile.ZipFile(z) as zf, self.assertRaises(importer.ImportError_):
             importer.safe_extract(zf, self.t / "out", max_bytes=100)
 
+    def lively(self, name, extra, info=None):
+        info = info or {"Type": "web", "FileName": "index.html", "Title": "T"}
+        return self.zip(name, {"LivelyInfo.json": json.dumps(info), "index.html": "<html>", **extra})
+
+    def assert_library_empty(self):
+        self.assertEqual(list(self.lib.iterdir()) if self.lib.exists() else [], [])
+
+    def test_traversal_zip_is_refused_before_anything_is_written(self):
+        z = self.lively("slip.zip", {"pkg/../../../evil.txt": "x"})
+        with self.assertRaises(importer.ImportError_) as c:
+            importer.import_path(z)
+        self.assertIn("Unsafe path", str(c.exception))
+        self.assertFalse((self.t / "evil.txt").exists())
+        self.assert_library_empty()
+
+    def test_symlink_entry_is_refused(self):
+        z = self.lively("link.zip", {})
+        with zipfile.ZipFile(z, "a") as zf:
+            zi = zipfile.ZipInfo("link")
+            zi.external_attr = 0o120777 << 16
+            zf.writestr(zi, "/etc/passwd")
+        with self.assertRaises(importer.ImportError_) as c:
+            importer.import_path(z)
+        self.assertIn("Symlink", str(c.exception))
+        self.assert_library_empty()
+
+    def test_zip_over_unpacked_cap_is_refused_and_cleaned_up(self):
+        z = self.lively("bomb.zip", {"big.bin": "x" * 1000})
+        with mock.patch.object(importer, "MAX_UNPACKED", 500), self.assertRaises(importer.ImportError_) as c:
+            importer.import_path(z)
+        self.assertIn("more than", str(c.exception))
+        self.assert_library_empty()
+
+    def test_too_many_files_is_refused(self):
+        z = self.lively("many.zip", {f"f{i}.txt": "" for i in range(5)})
+        with mock.patch.object(importer, "MAX_FILES", 3), self.assertRaises(importer.ImportError_):
+            importer.import_path(z)
+        self.assert_library_empty()
+
+    def test_filename_escaping_the_package_is_refused(self):
+        z = self.lively("esc.zip", {}, {"Type": "web", "FileName": "../outside.html", "Title": "T"})
+        with self.assertRaises(importer.ImportError_):
+            importer.import_path(z)
+        self.assert_library_empty()
+
+    def test_missing_wallpaper_file_is_refused_and_cleaned_up(self):
+        z = self.zip("gone.zip", {"LivelyInfo.json": json.dumps({"Type": "video", "FileName": "clip.mp4", "Title": "T"})})
+        with self.assertRaises(importer.ImportError_) as c:
+            importer.import_path(z)
+        self.assertIn("clip.mp4", str(c.exception))
+        self.assert_library_empty()
+
+
+class LivelyPreviewTest(Base):
+    def project(self, d):
+        return json.loads((d / "project.json").read_text())
+
+    def test_web_package_without_thumbnail_imports_without_preview(self):
+        z = self.zip("w.zip", {"LivelyInfo.json": json.dumps({"Type": "web", "FileName": "index.html", "Title": "W"}),
+                               "index.html": "<html>"})
+        with mock.patch.object(importer, "_thumb") as thumb:
+            d = importer.import_path(z)
+        thumb.assert_not_called()  # web pages get no ffmpeg thumbnail
+        self.assertNotIn("preview", self.project(d))
+        self.assertFalse(library.scan()[0].broken)
+
+    def test_video_without_thumbnail_gets_a_generated_preview(self):
+        z = self.zip("v.zip", {"LivelyInfo.json": json.dumps({"Type": "video", "FileName": "clip.mp4", "Title": "V"}),
+                               "clip.mp4": b"x"})
+        with mock.patch.object(importer, "_thumb", return_value="preview.jpg") as thumb:
+            d = importer.import_path(z)
+        self.assertEqual(thumb.call_args.args, (d / "clip.mp4", d / "preview.jpg"))
+        self.assertEqual(self.project(d)["preview"], "preview.jpg")
+
+    def test_video_imports_when_thumbnail_generation_fails(self):
+        z = self.zip("v.zip", {"LivelyInfo.json": json.dumps({"Type": "video", "FileName": "clip.mp4", "Title": "V"}),
+                               "clip.mp4": b"x"})
+        with mock.patch.object(importer, "_thumb", return_value=None):
+            d = importer.import_path(z)
+        self.assertNotIn("preview", self.project(d))
+        self.assertFalse(library.scan()[0].broken)
+
+    def test_declared_thumbnail_that_is_missing_or_outside_is_dropped(self):
+        for thumb in ("thumb.jpg", "../thumb.jpg", "/etc/hostname"):
+            with self.subTest(thumbnail=thumb):
+                info = {"Type": "web", "FileName": "index.html", "Title": "W", "Thumbnail": thumb}
+                z = self.zip("t.zip", {"LivelyInfo.json": json.dumps(info), "index.html": "<html>"})
+                d = importer.import_path(z)
+                self.assertNotIn("preview", self.project(d))
+
+    def test_shipped_thumbnail_is_kept(self):
+        info = {"Type": "web", "FileName": "index.html", "Title": "W", "Thumbnail": "thumb.jpg"}
+        z = self.zip("t.zip", {"LivelyInfo.json": json.dumps(info), "index.html": "<html>", "thumb.jpg": b"jpg"})
+        with mock.patch.object(importer, "_thumb") as thumb:
+            d = importer.import_path(z)
+        thumb.assert_not_called()
+        self.assertEqual(self.project(d)["preview"], "thumb.jpg")
+
 
 class LocalImportTest(Base):
     def test_video_is_symlinked_and_removal_keeps_original(self):
